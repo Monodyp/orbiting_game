@@ -1,8 +1,11 @@
 import type { LobbyView } from '@ice-water/shared';
+import type { CSSProperties } from 'react';
 import { isTwoMinuteWarningVisible } from '../game/match-night.js';
 import {
   isSnowstormWarningVisible,
   isSnowstormBegunVisible,
+  snowstormIntensity,
+  stormGustStrength,
 } from '../game/snowstorm.js';
 export type KillEntry = never;
 
@@ -25,8 +28,17 @@ export function GameHud({
   const isPlaying = view.phase === 'playing';
   const showSnowstormWarning = isPlaying && isSnowstormWarningVisible(remainingMs, view.mapId);
   const showSnowstormBegun = isPlaying && isSnowstormBegunVisible(remainingMs, view.mapId);
+  const stormIntensity = isPlaying ? snowstormIntensity(remainingMs, view.mapId) : 0;
+  const stormGust = isPlaying ? stormGustStrength(remainingMs, view.mapId) : 0;
+  const stormStyle = {
+    '--storm-intensity': stormIntensity,
+    '--storm-gust': stormGust,
+  } as CSSProperties;
   return (
     <div className="game-hud">
+      {stormIntensity > 0 && (
+        <div className="snowstorm-lens" style={stormStyle} aria-hidden="true" />
+      )}
       <div className="match-clock">
         <span>Ice Ice Water</span>
         <strong>
@@ -41,7 +53,7 @@ export function GameHud({
       )}
       {showSnowstormWarning && (
         <div className="snowstorm-warning" role="alert" aria-live="assertive">
-          ❄ SNOWSTORM INCOMING! ❄
+          ⚠ SNOWSTORM APPROACHING ⚠
         </div>
       )}
       {showSnowstormBegun && (

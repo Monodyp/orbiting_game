@@ -66,6 +66,32 @@ export function landingIntensity(verticalVelocity: number): number {
   return Math.min(1, 0.52 + fallingSpeed / 18);
 }
 
+export interface StormAudioMix {
+  readonly wind: number;
+  readonly rumble: number;
+  readonly gust: number;
+  readonly snow: number;
+}
+
+export function stormAudioMix(intensity: number, gust: number): StormAudioMix {
+  const storm = Math.min(1, Math.max(0, intensity));
+  const gustAmount = Math.min(1, Math.max(0, gust));
+  return {
+    wind: storm * (0.05 + storm * 0.19 + gustAmount * 0.12),
+    rumble: storm * storm * 0.11,
+    gust: storm * gustAmount * 0.22,
+    snow: storm * (0.015 + storm * 0.055 + gustAmount * 0.06),
+  };
+}
+
+interface StormAudioLayers {
+  readonly sources: readonly AudioBufferSourceNode[];
+  readonly wind: GainNode;
+  readonly rumble: GainNode;
+  readonly gust: GainNode;
+  readonly snow: GainNode;
+}
+
 export class CueCooldowns {
   private readonly lastPlayedAt = new Map<SoundCue, number>();
 
@@ -111,13 +137,11 @@ function fillCue(buffer: AudioBuffer, cue: SoundCue): void {
     } else if (cue === 'tag') {
       const frequency = t < 0.43 ? 760 : 1_140;
       phase += (Math.PI * 2 * frequency) / buffer.sampleRate;
-      sample =
-        (Math.sin(phase) * 0.72 + Math.sin(phase * 2.01) * 0.28) * envelope(t, 0.012, 1.6);
+      sample = (Math.sin(phase) * 0.72 + Math.sin(phase * 2.01) * 0.28) * envelope(t, 0.012, 1.6);
     } else if (cue === 'untag') {
       const frequency = 340 + 540 * t;
       phase += (Math.PI * 2 * frequency) / buffer.sampleRate;
-      sample =
-        (Math.sin(phase) * 0.76 + Math.sin(phase * 0.5) * 0.24) * envelope(t, 0.035, 1.45);
+      sample = (Math.sin(phase) * 0.76 + Math.sin(phase * 0.5) * 0.24) * envelope(t, 0.035, 1.45);
     } else {
       const start = BASE_FREQUENCIES[cue];
       const endMultiplier = cue === 'kill' ? 1.6 : 0.35;
@@ -139,6 +163,9 @@ export class AudioManager {
   private readonly cooldowns = new CueCooldowns();
   private variationIndex = 0;
   private isUnderwater = false;
+  private stormIntensity = 0;
+  private stormGust = 0;
+  private stormLayers?: StormAudioLayers;
   volume = 0.65;
 
   unlock(): void {
@@ -152,6 +179,7 @@ export class AudioManager {
       this.gain.connect(this.lowPass);
       this.lowPass.connect(this.context.destination);
       this.preload(this.context);
+      this.ensureStormLayers(this.context);
     }
     void this.context.resume().catch(() => {});
   }
@@ -165,6 +193,21 @@ export class AudioManager {
       this.context.currentTime,
       0.08,
     );
+  }
+
+  /** Smoothly blends the continuous wind, rumble, gust and snow-noise layers. */
+  setStorm(intensity: number, gust: number): void {
+    this.stormIntensity = Math.min(1, Math.max(0, intensity));
+    this.stormGust = Math.min(1, Math.max(0, gust));
+    const context = this.context;
+    const layers = this.stormLayers;
+    if (!context || !layers) return;
+    const mix = stormAudioMix(this.stormIntensity, this.stormGust);
+    const now = context.currentTime;
+    layers.wind.gain.setTargetAtTime(mix.wind, now, 0.45);
+    layers.rumble.gain.setTargetAtTime(mix.rumble, now, 0.8);
+    layers.gust.gain.setTargetAtTime(mix.gust, now, 0.18);
+    layers.snow.gain.setTargetAtTime(mix.snow, now, 0.3);
   }
 
   listener(position: SpatialPosition, yaw: number): void {
@@ -226,12 +269,60 @@ export class AudioManager {
   }
 
   destroy(): void {
+    this.stormLayers?.sources.forEach((source) => {
+      try {
+        source.stop();
+      } catch {
+        /* Source may already have stopped during context teardown. */
+      }
+      source.disconnect();
+    });
+    this.stormLayers = undefined;
     this.buffers.clear();
     void this.context?.close().catch(() => {});
   }
 
   private preload(context: AudioContext): void {
     (Object.keys(CUE_PROFILES) as SoundCue[]).forEach((cue) => this.createBuffer(context, cue));
+  }
+
+  private ensureStormLayers(context: AudioContext): void {
+    if (this.stormLayers || !this.gain) return;
+    const buffer = createStormNoiseBuffer(context);
+    const makeLayer = (
+      type: BiquadFilterType,
+      frequency: number,
+      q: number,
+      playbackRate: number,
+    ) => {
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      source.playbackRate.value = playbackRate;
+      const filter = context.createBiquadFilter();
+      filter.type = type;
+      filter.frequency.value = frequency;
+      filter.Q.value = q;
+      const gain = context.createGain();
+      gain.gain.value = 0;
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.gain!);
+      source.start();
+      return { source, gain };
+    };
+    const wind = makeLayer('lowpass', 920, 0.55, 0.83);
+    const rumble = makeLayer('lowpass', 130, 0.7, 0.47);
+    const gust = makeLayer('bandpass', 1_450, 0.48, 1.13);
+    const snow = makeLayer('highpass', 2_100, 0.42, 0.97);
+    this.stormLayers = {
+      sources: [wind.source, rumble.source, gust.source, snow.source],
+      wind: wind.gain,
+      rumble: rumble.gain,
+      gust: gust.gain,
+      snow: snow.gain,
+    };
+    this.setStorm(this.stormIntensity, this.stormGust);
   }
 
   private createBuffer(context: AudioContext, cue: SoundCue): AudioBuffer {
@@ -247,4 +338,19 @@ export class AudioManager {
     this.buffers.set(cue, buffer);
     return buffer;
   }
+}
+
+function createStormNoiseBuffer(context: AudioContext): AudioBuffer {
+  const durationSeconds = 4;
+  const buffer = context.createBuffer(1, context.sampleRate * durationSeconds, context.sampleRate);
+  const samples = buffer.getChannelData(0);
+  let state = 91_827;
+  let smooth = 0;
+  for (let index = 0; index < samples.length; index += 1) {
+    state = (state * 16_807) % 2_147_483_647;
+    const white = (state / 2_147_483_647) * 2 - 1;
+    smooth = smooth * 0.72 + white * 0.28;
+    samples[index] = white * 0.58 + smooth * 0.42;
+  }
+  return buffer;
 }

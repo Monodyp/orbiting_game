@@ -6,18 +6,30 @@ import {
   Group,
   Mesh,
   MeshStandardMaterial,
+  PlaneGeometry,
   CylinderGeometry,
   type Scene,
 } from 'three';
 import { disposeModel } from './model-disposal.js';
 export class FrostlineMap {
   readonly group = new Group();
+  private readonly accumulationMaterial: MeshStandardMaterial;
   constructor(scene: Scene) {
     const snow = new MeshStandardMaterial({ color: 0xedf6fa, roughness: 0.9 });
     const navy = new MeshStandardMaterial({ color: 0x18334b, roughness: 0.75 });
     const blue = new MeshStandardMaterial({ color: 0x308cad, roughness: 0.7 });
     const ice = new MeshStandardMaterial({ color: 0x74d9ec, roughness: 0.2, metalness: 0.15 });
     const amber = new MeshStandardMaterial({ color: 0xf3b747, roughness: 0.6 });
+    this.accumulationMaterial = new MeshStandardMaterial({
+      color: 0xe7f2f7,
+      roughness: 0.96,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
     const floor = new Mesh(new BoxGeometry(120, 0.3, 120), snow);
     floor.position.y = -0.15;
     this.group.add(floor);
@@ -35,6 +47,16 @@ export class FrostlineMap {
       const trim = new Mesh(new BoxGeometry(block.width + 0.02, 0.1, block.depth + 0.02), ice);
       trim.position.set(block.x, block.y + block.height - 0.2, block.z);
       this.group.add(trim);
+      const cap = new Mesh(
+        new PlaneGeometry(Math.max(0.1, block.width - 0.08), Math.max(0.1, block.depth - 0.08)),
+        this.accumulationMaterial,
+      );
+      cap.name = `snow-cap-${block.id}`;
+      cap.rotation.x = -Math.PI / 2;
+      cap.position.set(block.x, block.y + block.height + 0.012, block.z);
+      cap.visible = false;
+      cap.renderOrder = 3;
+      this.group.add(cap);
     }
     for (const r of ARENA_RAMPS) {
       const w = r.width / 2,
@@ -58,6 +80,17 @@ export class FrostlineMap {
       const mesh = new Mesh(geometry, blue);
       mesh.position.set(r.x, 0, r.z);
       this.group.add(mesh);
+      const slope = Math.atan2(r.height, r.depth) * r.direction;
+      const cap = new Mesh(
+        new PlaneGeometry(r.width - 0.08, Math.hypot(r.depth, r.height) - 0.08),
+        this.accumulationMaterial,
+      );
+      cap.name = 'snow-cap-ramp';
+      cap.rotation.x = -Math.PI / 2 + slope;
+      cap.position.set(r.x, r.height / 2 + 0.015, r.z);
+      cap.visible = false;
+      cap.renderOrder = 3;
+      this.group.add(cap);
     }
     for (const patch of [...ICE_PATCHES, ...WATER_PATCHES]) {
       const mesh = new Mesh(
@@ -81,6 +114,14 @@ export class FrostlineMap {
     ring.position.y = 3.4;
     this.group.add(ring);
     scene.add(this.group);
+  }
+  /** Presentation-only roof/platform coverage; collision geometry is unchanged. */
+  setSnowAccumulation(accumulation: number): void {
+    const amount = Math.min(1, Math.max(0, accumulation));
+    this.accumulationMaterial.opacity = amount * 0.82;
+    for (const child of this.group.children) {
+      if (child.name.startsWith('snow-cap-')) child.visible = amount > 0.015;
+    }
   }
   destroy(): void {
     disposeModel(this.group);

@@ -29,6 +29,8 @@ The pre-match client keeps one `LobbyScene` alive while React changes between ma
 
 Music is application-scoped rather than panel- or match-scoped. One Web Audio graph decodes and continuously loops the repository-authored track across the lobby, active match, results, and subsequent matches; it shares persisted master/music/SFX/mute preferences and resumes after a valid interaction when autoplay is blocked. Only application teardown stops the source. Private-room creation remains the Play action; the lobby does not simulate a public matchmaking queue, friends service, progression, rank, currency, or cosmetic inventory.
 
+Frostline weather is client presentation keyed only to authoritative remaining time. A deterministic storm sampler feeds one layered GPU point draw call, a camera-local ground-drift shader, presentation-only structure caps, cloud speed/color, linear fog, light/exposure, peripheral HUD frost, restrained camera sway, and four smoothly mixed procedural Web Audio layers. The effect begins at 4:00 remaining and never mutates the deadline, movement, collision, rules, or protocol. Touch and reduced-effects modes lower the fixed particle allocation; no distant player owns a separate storm simulation.
+
 ## Security and access
 Retain HMAC-SHA256 signed guests, timing-safe signature verification, per-tab storage, random eight-character invites, origins, 4 KiB payload cap, private/unlisted rooms. Public Colyseus matchmaking remains blocked; authenticated HTTP issues seats and WebSocket auth verifies sessions again. Never log tokens, connection strings, or unnecessary personal data.
 

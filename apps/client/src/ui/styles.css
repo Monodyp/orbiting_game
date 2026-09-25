@@ -1244,6 +1244,65 @@ form .primary {
   }
 }
 /* ── Snowstorm warnings ── */
+.snowstorm-lens {
+  --storm-intensity: 0;
+  --storm-gust: 0;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: calc(var(--storm-intensity) * 0.82);
+  background:
+    radial-gradient(
+      circle at 50% 48%,
+      transparent 0 29%,
+      rgb(206 230 239 / 4%) 48%,
+      rgb(196 224 235 / 30%) 82%,
+      rgb(228 243 247 / 62%) 115%
+    ),
+    linear-gradient(112deg, transparent 15%, rgb(220 240 247 / 8%) 47%, transparent 76%);
+  box-shadow:
+    inset 0 0 9vmin rgb(218 239 247 / 22%),
+    inset 0 0 22vmin rgb(162 196 211 / 18%);
+  filter: saturate(0.72) contrast(1.04);
+  animation: storm-lens-breathe 4.8s ease-in-out infinite;
+  pointer-events: none;
+}
+.snowstorm-lens::before,
+.snowstorm-lens::after {
+  position: absolute;
+  content: '';
+  pointer-events: none;
+}
+.snowstorm-lens::before {
+  inset: -14%;
+  opacity: calc(0.1 + var(--storm-gust) * 0.3);
+  background: repeating-linear-gradient(
+    102deg,
+    transparent 0 7%,
+    rgb(236 249 252 / 9%) 7.3% 7.7%,
+    transparent 8% 15%
+  );
+  transform: translateX(calc(var(--storm-gust) * 3%));
+}
+.snowstorm-lens::after {
+  inset: 0;
+  opacity: calc(var(--storm-intensity) * 0.5);
+  background:
+    radial-gradient(ellipse at -8% 9%, rgb(240 250 252 / 76%) 0 2%, transparent 9%),
+    radial-gradient(ellipse at 103% 84%, rgb(221 241 246 / 68%) 0 4%, transparent 12%),
+    radial-gradient(ellipse at 91% -6%, rgb(227 244 248 / 58%) 0 3%, transparent 11%),
+    radial-gradient(ellipse at 4% 104%, rgb(231 246 249 / 52%) 0 5%, transparent 14%);
+  filter: blur(2px);
+}
+@keyframes storm-lens-breathe {
+  0%,
+  100% {
+    filter: saturate(0.72) contrast(1.04) brightness(0.98);
+  }
+  50% {
+    filter: saturate(0.66) contrast(1.06) brightness(1.025);
+  }
+}
 .snowstorm-warning {
   position: absolute;
   top: 50%;
@@ -1262,8 +1321,37 @@ form .primary {
     0 0 30px #6adcf0dd,
     0 0 80px #3fc8e899,
     0 8px 36px #020b18e6;
-  animation: snowstorm-fade 3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: snowstorm-warning-pulse 3.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   pointer-events: none;
+}
+@keyframes snowstorm-warning-pulse {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -44%) scale(1.09);
+    filter: blur(8px);
+  }
+  17% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    filter: blur(0);
+  }
+  34%,
+  52% {
+    opacity: 0.58;
+    text-shadow:
+      0 2px 0 #1e5a8a,
+      0 0 18px #6adcf0aa,
+      0 8px 36px #020b18e6;
+  }
+  43%,
+  67% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -56%) scale(0.97);
+    filter: blur(3px);
+  }
 }
 .snowstorm-begun {
   position: absolute;
@@ -1304,8 +1392,14 @@ form .primary {
     filter: blur(3px);
   }
 }
+@media (prefers-reduced-motion: reduce) {
+  .snowstorm-lens,
+  .snowstorm-warning,
+  .snowstorm-begun {
+    animation: none;
+  }
+}
 .frozen-status {
-
   position: absolute;
   top: 28%;
   left: 50%;
