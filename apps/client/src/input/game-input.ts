@@ -66,9 +66,10 @@ export class GameInput {
       pitch: this.cameraPitch,
       jump: this.hasJump,
       slide: this.hasSlide,
-      crouch: this.keys.has('KeyC') || this.isTouchCrouching,
+      crouch:
+        this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.isTouchCrouching,
       sprint:
-        this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.isTouchSprinting,
+        this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.isTouchSprinting,
       hasInteraction: this.hasInteraction,
       hasLunge: this.hasLunge,
     };
@@ -113,7 +114,6 @@ export class GameInput {
         'ControlLeft',
         'ControlRight',
         'KeyC',
-        'KeyQ',
         'Tab',
       ];
       if (!codes.includes(event.code)) return;
@@ -122,8 +122,11 @@ export class GameInput {
       if (event.code === 'Tab') this.isScoreboard = true;
       if (event.repeat) return;
       if (event.code === 'Space') this.pressJump();
-      if (event.code.startsWith('Shift')) this.pressSlide();
-      if (event.code === 'KeyQ') this.pressLunge();
+      if (event.code === 'KeyC') this.pressSlide();
+    };
+    const pointerDown = (event: PointerEvent) => {
+      if (!this.isEnabled || event.pointerType === 'touch' || event.button !== 2) return;
+      this.pressLunge();
     };
     const up = (event: KeyboardEvent) => {
       this.keys.delete(event.code);
@@ -132,11 +135,13 @@ export class GameInput {
     const reset = () => this.reset();
     target.addEventListener('keydown', down);
     target.addEventListener('keyup', up);
+    target.addEventListener('pointerdown', pointerDown);
     target.addEventListener('blur', reset);
     target.document.addEventListener('visibilitychange', reset);
     return () => {
       target.removeEventListener('keydown', down);
       target.removeEventListener('keyup', up);
+      target.removeEventListener('pointerdown', pointerDown);
       target.removeEventListener('blur', reset);
       target.document.removeEventListener('visibilitychange', reset);
       this.reset();

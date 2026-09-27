@@ -13,7 +13,7 @@ import {
   UniformsUtils,
   UniformsLib,
 } from 'three';
-import type { MapId } from '@ice-water/shared';
+import { GAMEPLAY, type MapId } from '@ice-water/shared';
 
 /**
  * Snowstorm timing constants (all in milliseconds of remaining match time).
@@ -21,87 +21,68 @@ import type { MapId } from '@ice-water/shared';
  * duration itself is never modified.
  * The snowstorm mechanic is active only on Frostline.
  */
-export const STORM_WARNING_START_MS = 240_000; // 4:00 remaining: "SNOWSTORM INCOMING!"
-export const STORM_WARNING_DURATION_MS = 3_000; // Visible for 3 seconds
-export const SNOWFALL_START_MS = 236_500; // ~3:56.5: Snowflakes begin falling + "The snowstorm has begun!"
-export const STORM_BEGUN_DURATION_MS = 3_000; // Visible for 3 seconds
-export const STORM_MID_MS = 120_000; // 2:00 remaining: Noticeable snow accumulation
-export const STORM_HEAVY_MS = 60_000; // 1:00 remaining: Heavy snowstorm / thick snow
-export const STORM_MAX_MS = 10_000; // 0:10 remaining: Maximum snow coverage & intensity
+const SNOW_START_REMAINING_MS = 240_000;
+export const STORM_MID_MS = 180_000; // 2:00 elapsed: Noticeably denser snowfall
+export const STORM_HEAVY_MS = 120_000; // 3:00 elapsed: Heavy snowfall
+export const STORM_MAX_MS = 60_000; // 4:00 elapsed: Maximum density; emission stops
+
+const SNOW_EMISSION_STOP_ELAPSED_SECONDS =
+  (GAMEPLAY.tdmTimeLimitMs - STORM_MAX_MS) / 1000;
+const SNOW_START_ELAPSED_SECONDS =
+  (GAMEPLAY.tdmTimeLimitMs - SNOW_START_REMAINING_MS) / 1000;
 
 /** Frostline snowstorm radius and ground plane size. */
 const FROSTLINE_EXTENT = { radius: 70, ground: 130, groundY: 0.02 } as const;
 
-/** Checks if the "SNOWSTORM INCOMING!" warning should be displayed (Frostline only). */
-export function isSnowstormWarningVisible(remainingMs: number, mapId: MapId = 'frostline'): boolean {
-  if (mapId !== 'frostline') return false;
-  return (
-    remainingMs <= STORM_WARNING_START_MS &&
-    remainingMs > STORM_WARNING_START_MS - STORM_WARNING_DURATION_MS
-  );
-}
-
-/** Checks if the "The snowstorm has begun!" message should be displayed (Frostline only). */
-export function isSnowstormBegunVisible(remainingMs: number, mapId: MapId = 'frostline'): boolean {
-  if (mapId !== 'frostline') return false;
-  return (
-    remainingMs <= SNOWFALL_START_MS &&
-    remainingMs > SNOWFALL_START_MS - STORM_BEGUN_DURATION_MS
-  );
-}
-
 /**
- * Returns a 0–1 snowstorm intensity based on remaining match milliseconds.
- * Only active on Frostline.
- * 0 = no snow, 1 = maximum blizzard.
+ * Frostline snow visual ramp follows the authoritative round timer without a
+ * separate timer. It starts at a gentle 20% at the 1:00 gameplay mark and
+ * reaches full intensity by the 4:00 gameplay mark.
  */
 export function snowstormIntensity(remainingMs: number, mapId: MapId = 'frostline'): number {
   if (mapId !== 'frostline') return 0;
-  if (remainingMs >= SNOWFALL_START_MS) return 0;
-  if (remainingMs <= STORM_MAX_MS) return 1;
+  if (remainingMs > 240_000) return 0;
+  if (remainingMs <= 60_000) return 1;
 
-  if (remainingMs > STORM_MID_MS) {
-    // 3:56.5 → 2:00: light snow, 0 → 0.3
-    const t = (SNOWFALL_START_MS - remainingMs) / (SNOWFALL_START_MS - STORM_MID_MS);
-    return t * 0.3;
-  }
-  if (remainingMs > STORM_HEAVY_MS) {
-    // 2:00 → 1:00: moderate to heavy, 0.3 → 0.65
-    const t = (STORM_MID_MS - remainingMs) / (STORM_MID_MS - STORM_HEAVY_MS);
-    return 0.3 + t * 0.35;
-  }
-  // 1:00 → 0:10: heavy to max, 0.65 → 1.0
-  const t = (STORM_HEAVY_MS - remainingMs) / (STORM_HEAVY_MS - STORM_MAX_MS);
-  return 0.65 + t * 0.35;
+  const t = clamp01((240_000 - remainingMs) / 180_000);
+  return 0.2 + 0.8 * t;
 }
 
 /**
- * Returns a 0–1 snow ground accumulation factor.
- * Only active on Frostline.
+ * Returns a 0–1 snow ground accumulation factor that matches the same visual ramp.
  */
 export function snowAccumulation(remainingMs: number, mapId: MapId = 'frostline'): number {
   if (mapId !== 'frostline') return 0;
-  if (remainingMs >= SNOWFALL_START_MS) return 0;
-  if (remainingMs <= STORM_MAX_MS) return 1;
+  if (remainingMs > 240_000) return 0;
+  if (remainingMs <= 60_000) return 1;
 
-  if (remainingMs > STORM_MID_MS) {
-    // 3:56.5 → 2:00: gradual accumulation, 0 → 0.15 (noticeable snow)
-    const t = (SNOWFALL_START_MS - remainingMs) / (SNOWFALL_START_MS - STORM_MID_MS);
-    return t * 0.15;
-  }
-  if (remainingMs > STORM_HEAVY_MS) {
-    // 2:00 → 1:00: noticeably thicker, 0.15 → 0.55
-    const t = (STORM_MID_MS - remainingMs) / (STORM_MID_MS - STORM_HEAVY_MS);
-    return 0.15 + t * 0.4;
-  }
-  // 1:00 → 0:10: thick snow to maximum coverage, 0.55 → 1.0
-  const t = (STORM_HEAVY_MS - remainingMs) / (STORM_HEAVY_MS - STORM_MAX_MS);
-  return 0.55 + t * 0.45;
+  const t = clamp01((240_000 - remainingMs) / 180_000);
+  return 0.2 + 0.8 * t;
+}
+
+/** Positive only while the timer-authoritative snow emitter is active. */
+export function snowEmissionRate(
+  remainingMs: number,
+  mapId: MapId = 'frostline',
+  hasSnowStarted = true,
+): number {
+  if (!hasSnowStarted || mapId !== 'frostline') return 0;
+  if (remainingMs > SNOW_START_REMAINING_MS || remainingMs <= STORM_MAX_MS) return 0;
+  return snowstormIntensity(remainingMs, mapId);
+}
+
+/** Elapsed fall time for flakes already in flight after emission stops. */
+export function snowParticleFallElapsedSeconds(remainingMs: number): number {
+  return Math.max(0, (STORM_MAX_MS - remainingMs) / 1000);
 }
 
 // ── Particle counts by quality ──
 const PARTICLE_COUNTS = { high: 4000, medium: 2400, low: 1200 } as const;
 type Quality = keyof typeof PARTICLE_COUNTS;
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
 
 /**
  * Performance-friendly snowstorm rendered with a single GPU particle system
@@ -121,6 +102,11 @@ export class Snowstorm {
   private readonly maxParticles: number;
   private currentIntensity = 0;
   private currentAccumulation = 0;
+  private currentEmissionRate = 0;
+
+  get emissionRate(): number {
+    return this.currentEmissionRate;
+  }
 
   constructor(
     scene: Scene,
@@ -155,6 +141,11 @@ export class Snowstorm {
         ...UniformsUtils.clone(UniformsLib.fog!),
         uTime: { value: 0 },
         uIntensity: { value: 0 },
+        uMatchElapsedSeconds: { value: 0 },
+        uEmissionRate: { value: 0 },
+        uSnowStartElapsedSeconds: { value: SNOW_START_ELAPSED_SECONDS },
+        uEmissionStopElapsedSeconds: { value: SNOW_EMISSION_STOP_ELAPSED_SECONDS },
+        uSecondsAfterEmissionStop: { value: 0 },
         uFallHeight: { value: 50 },
         uRadius: { value: extent.radius },
         uCameraPos: { value: { x: 0, y: 0, z: 0 } },
@@ -163,7 +154,9 @@ export class Snowstorm {
         #include <common>
         #include <fog_pars_vertex>
         attribute vec2 seed;
-        uniform float uTime, uIntensity, uFallHeight, uRadius;
+        uniform float uTime, uIntensity, uMatchElapsedSeconds, uEmissionRate;
+        uniform float uSnowStartElapsedSeconds, uEmissionStopElapsedSeconds;
+        uniform float uSecondsAfterEmissionStop, uFallHeight, uRadius;
         uniform vec3 uCameraPos;
         varying float vAlpha;
 
@@ -171,9 +164,16 @@ export class Snowstorm {
           float fallSpeed = seed.y * (3.0 + uIntensity * 5.0);
           float drift = seed.x;
 
-          // Wrap the snowflake around the camera so it always falls nearby
+          // Emit continuously before the cutoff; afterward, let in-flight flakes fall out.
           vec3 p = position;
-          p.y = mod(p.y - uTime * fallSpeed, uFallHeight);
+          if (uEmissionRate > 0.0 && uMatchElapsedSeconds < uEmissionStopElapsedSeconds) {
+            float snowElapsed = max(0.0, uMatchElapsedSeconds - uSnowStartElapsedSeconds);
+            p.y = mod(p.y - snowElapsed * fallSpeed, uFallHeight);
+          } else {
+            float fallBeforeStop = uEmissionStopElapsedSeconds - uSnowStartElapsedSeconds;
+            float cutoffHeight = mod(p.y - fallBeforeStop * fallSpeed, uFallHeight);
+            p.y = cutoffHeight - uSecondsAfterEmissionStop * fallSpeed;
+          }
           p.x += sin(uTime * 0.5 + drift) * (1.5 + uIntensity * 2.0);
           p.z += cos(uTime * 0.37 + drift * 1.3) * (1.2 + uIntensity * 1.5);
 
@@ -243,7 +243,8 @@ export class Snowstorm {
 
         void main() {
           vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
           #include <fog_vertex>
         }
       `,
@@ -312,14 +313,21 @@ export class Snowstorm {
    * @param remainingMs     - milliseconds remaining on the match timer
    * @param cameraPosition  - current camera world position
    */
-  update(elapsedSeconds: number, remainingMs: number, cameraPosition: Vector3): void {
+  update(
+    elapsedSeconds: number,
+    remainingMs: number,
+    cameraPosition: Vector3,
+    hasSnowStarted = true,
+  ): void {
     if (this.mapId !== 'frostline') {
       this.group.visible = false;
       return;
     }
-    this.currentIntensity = snowstormIntensity(remainingMs, this.mapId);
-    this.currentAccumulation = snowAccumulation(remainingMs, this.mapId);
-    const isActive = this.currentIntensity > 0;
+    this.currentIntensity = hasSnowStarted ? snowstormIntensity(remainingMs, this.mapId) : 0;
+    this.currentAccumulation = hasSnowStarted ? snowAccumulation(remainingMs, this.mapId) : 0;
+    this.currentEmissionRate = snowEmissionRate(remainingMs, this.mapId, hasSnowStarted);
+    const visualIntensity = this.currentIntensity;
+    const isActive = visualIntensity > 0.0001 || (!!hasSnowStarted && remainingMs <= 240_000);
     this.group.visible = isActive;
     if (!isActive) return;
 
@@ -327,10 +335,13 @@ export class Snowstorm {
     const pu = this.particleMaterial.uniforms;
     pu.uTime!.value = elapsedSeconds;
     pu.uIntensity!.value = this.currentIntensity;
+    pu.uMatchElapsedSeconds!.value = (GAMEPLAY.tdmTimeLimitMs - remainingMs) / 1000;
+    pu.uEmissionRate!.value = this.currentEmissionRate;
+    pu.uSecondsAfterEmissionStop!.value = snowParticleFallElapsedSeconds(remainingMs);
     pu.uCameraPos!.value = cameraPosition;
 
     // Adjust visible particle count based on intensity
-    const visibleCount = Math.ceil(this.maxParticles * this.currentIntensity);
+    const visibleCount = Math.ceil(this.maxParticles * Math.max(this.currentIntensity, 0.05));
     this.snowParticles.geometry.setDrawRange(0, visibleCount);
 
     // Update ground snow uniforms

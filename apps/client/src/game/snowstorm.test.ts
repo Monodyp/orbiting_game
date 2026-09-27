@@ -1,32 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { Scene, Vector3 } from 'three';
+import { Mesh, Points, Scene, Vector3 } from 'three';
 import {
-  SNOWFALL_START_MS,
-  STORM_BEGUN_DURATION_MS,
-  STORM_HEAVY_MS,
   STORM_MAX_MS,
   STORM_MID_MS,
-  STORM_WARNING_DURATION_MS,
-  STORM_WARNING_START_MS,
   Snowstorm,
-  isSnowstormBegunVisible,
-  isSnowstormWarningVisible,
   snowAccumulation,
+  snowEmissionRate,
+  snowParticleFallElapsedSeconds,
   snowstormIntensity,
 } from './snowstorm.js';
 
 describe('Snowstorm mechanic (Frostline only)', () => {
   describe('Map restriction', () => {
     it('is only active on frostline and remains inactive on island and original', () => {
-      // Warnings
-      expect(isSnowstormWarningVisible(STORM_WARNING_START_MS, 'frostline')).toBe(true);
-      expect(isSnowstormWarningVisible(STORM_WARNING_START_MS, 'island')).toBe(false);
-      expect(isSnowstormWarningVisible(STORM_WARNING_START_MS, 'original')).toBe(false);
-
-      expect(isSnowstormBegunVisible(SNOWFALL_START_MS, 'frostline')).toBe(true);
-      expect(isSnowstormBegunVisible(SNOWFALL_START_MS, 'island')).toBe(false);
-      expect(isSnowstormBegunVisible(SNOWFALL_START_MS, 'original')).toBe(false);
-
       // Intensity & accumulation
       expect(snowstormIntensity(STORM_MID_MS, 'frostline')).toBeGreaterThan(0);
       expect(snowstormIntensity(STORM_MID_MS, 'island')).toBe(0);
@@ -38,87 +24,40 @@ describe('Snowstorm mechanic (Frostline only)', () => {
     });
   });
 
-  describe('Warning timings at 4:00 remaining', () => {
-    it('shows "SNOWSTORM INCOMING!" warning at 4:00 for 3 seconds then disappears', () => {
-      // Before 4:00
-      expect(isSnowstormWarningVisible(STORM_WARNING_START_MS + 1, 'frostline')).toBe(false);
-
-      // Exactly at 4:00
-      expect(isSnowstormWarningVisible(STORM_WARNING_START_MS, 'frostline')).toBe(true);
-
-      // During the 3-second display window
-      expect(isSnowstormWarningVisible(STORM_WARNING_START_MS - 1500, 'frostline')).toBe(true);
-      expect(
-        isSnowstormWarningVisible(STORM_WARNING_START_MS - STORM_WARNING_DURATION_MS + 1, 'frostline'),
-      ).toBe(true);
-
-      // After 3 seconds, warning disappears
-      expect(
-        isSnowstormWarningVisible(STORM_WARNING_START_MS - STORM_WARNING_DURATION_MS, 'frostline'),
-      ).toBe(false);
+  describe('Snowfall intensity and emission progression', () => {
+    it('starts minimal at the 1:00 gameplay mark and ramps through the storm window', () => {
+      expect(snowstormIntensity(300_000, 'frostline')).toBe(0);
+      expect(snowstormIntensity(240_000, 'frostline')).toBeCloseTo(0.2, 2);
+      expect(snowstormIntensity(180_000, 'frostline')).toBeCloseTo(0.47, 2);
+      expect(snowstormIntensity(120_000, 'frostline')).toBeCloseTo(0.73, 2);
     });
 
-    it('shows "The snowstorm has begun!" shortly after at 3:56.5 for 3 seconds', () => {
-      // Before begun delay
-      expect(isSnowstormBegunVisible(SNOWFALL_START_MS + 1, 'frostline')).toBe(false);
-
-      // Exactly at snowfall start (3:56.5 remaining)
-      expect(isSnowstormBegunVisible(SNOWFALL_START_MS, 'frostline')).toBe(true);
-
-      // During display window
-      expect(isSnowstormBegunVisible(SNOWFALL_START_MS - 1500, 'frostline')).toBe(true);
-      expect(
-        isSnowstormBegunVisible(SNOWFALL_START_MS - STORM_BEGUN_DURATION_MS + 1, 'frostline'),
-      ).toBe(true);
-
-      // After 3 seconds, disappears
-      expect(
-        isSnowstormBegunVisible(SNOWFALL_START_MS - STORM_BEGUN_DURATION_MS, 'frostline'),
-      ).toBe(false);
-    });
-  });
-
-  describe('Snowfall intensity progression', () => {
-    it('does not fall before the snowstorm begins', () => {
-      expect(snowstormIntensity(STORM_WARNING_START_MS, 'frostline')).toBe(0);
-      expect(snowstormIntensity(SNOWFALL_START_MS, 'frostline')).toBe(0);
-    });
-
-    it('starts light shortly after warning and gradually increases to 0.3 at 2:00', () => {
-      const early = snowstormIntensity(SNOWFALL_START_MS - 10_000, 'frostline');
-      expect(early).toBeGreaterThan(0);
-      expect(early).toBeLessThan(0.1);
-
-      expect(snowstormIntensity(STORM_MID_MS, 'frostline')).toBeCloseTo(0.3);
-    });
-
-    it('increases to heavier snowfall (0.65) around 1:00 remaining', () => {
-      expect(snowstormIntensity(STORM_HEAVY_MS, 'frostline')).toBeCloseTo(0.65);
-    });
-
-    it('reaches maximum blizzard intensity (1.0) around 0:10 remaining and stays max until 0:00', () => {
+    it('reaches full snowfall by the 1:00 remaining threshold without a sudden jump', () => {
+      expect(snowstormIntensity(120_000, 'frostline')).toBeCloseTo(0.73, 2);
       expect(snowstormIntensity(STORM_MAX_MS, 'frostline')).toBe(1.0);
-      expect(snowstormIntensity(5_000, 'frostline')).toBe(1.0);
-      expect(snowstormIntensity(0, 'frostline')).toBe(1.0);
+      expect(snowstormIntensity(STORM_MAX_MS - 15_000, 'frostline')).toBe(1.0);
+    });
+
+    it('stops emission exactly at 4:00 elapsed while in-flight flakes keep aging', () => {
+      expect(snowEmissionRate(STORM_MAX_MS + 1, 'frostline')).toBeGreaterThan(0);
+      expect(snowEmissionRate(STORM_MAX_MS, 'frostline')).toBe(0);
+      expect(snowEmissionRate(STORM_MAX_MS - 1, 'frostline')).toBe(0);
+      expect(snowEmissionRate(STORM_MAX_MS, 'frostline', false)).toBe(0);
+      expect(snowEmissionRate(STORM_MAX_MS, 'island')).toBe(0);
+
+      expect(snowParticleFallElapsedSeconds(STORM_MAX_MS)).toBe(0);
+      expect(snowParticleFallElapsedSeconds(STORM_MAX_MS - 15_000)).toBe(15);
     });
   });
 
   describe('Ground snow accumulation progression', () => {
-    it('has zero accumulation before snowfall starts', () => {
-      expect(snowAccumulation(SNOWFALL_START_MS, 'frostline')).toBe(0);
-    });
-
-    it('has noticeable snow accumulation around 2:00 (0.15)', () => {
-      expect(snowAccumulation(STORM_MID_MS, 'frostline')).toBeCloseTo(0.15);
-    });
-
-    it('has thick snow accumulation around 1:00 (0.55)', () => {
-      expect(snowAccumulation(STORM_HEAVY_MS, 'frostline')).toBeCloseTo(0.55);
-    });
-
-    it('has maximum blanket coverage (1.0) around 0:10 remaining through 0:00', () => {
+    it('matches the same visible snow ramp and fade-out curve', () => {
+      expect(snowAccumulation(300_000, 'frostline')).toBe(0);
+      expect(snowAccumulation(240_000, 'frostline')).toBeCloseTo(0.2, 2);
+      expect(snowAccumulation(180_000, 'frostline')).toBeCloseTo(0.47, 2);
+      expect(snowAccumulation(120_000, 'frostline')).toBeCloseTo(0.73, 2);
       expect(snowAccumulation(STORM_MAX_MS, 'frostline')).toBe(1.0);
-      expect(snowAccumulation(0, 'frostline')).toBe(1.0);
+      expect(snowAccumulation(STORM_MAX_MS - 15_000, 'frostline')).toBe(1.0);
     });
   });
 
@@ -130,15 +69,39 @@ describe('Snowstorm mechanic (Frostline only)', () => {
       expect(scene.children).toContain(storm.group);
       expect(storm.group.name).toBe('SNOWSTORM');
       expect(storm.group.visible).toBe(false);
+      const ground = storm.group.children.find((child) => child.name === 'snowstorm-ground');
+      expect(ground).toBeInstanceOf(Mesh);
+      if (ground instanceof Mesh)
+        expect((ground.material as import('three').ShaderMaterial).vertexShader).toContain(
+          'vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);',
+        );
 
       const cameraPos = new Vector3(0, 1.7, 0);
 
-      // Before storm: invisible
-      storm.update(10, STORM_WARNING_START_MS, cameraPos);
+      // Before the 1:00 gameplay mark, the storm should be inactive.
+      storm.update(10, 300_000, cameraPos);
       expect(storm.group.visible).toBe(false);
 
-      // During storm: visible
-      storm.update(15, STORM_MID_MS, cameraPos);
+      // At 1:00 elapsed, minimal snow should become visible.
+      storm.update(60, 240_000, cameraPos);
+      expect(storm.group.visible).toBe(true);
+
+      // During the ramp toward the 3:00 mark, visible and growing.
+      storm.update(120, 180_000, cameraPos);
+      expect(storm.group.visible).toBe(true);
+
+      storm.update(240, STORM_MAX_MS + 1, cameraPos, true);
+      expect(storm.emissionRate).toBeGreaterThan(0);
+      storm.update(240, STORM_MAX_MS, cameraPos, true);
+      expect(storm.emissionRate).toBe(0);
+      expect(storm.group.visible).toBe(true);
+      const particles = storm.group.children.find((child) => child.name === 'snowstorm-particles');
+      expect(particles).toBeInstanceOf(Points);
+      if (particles instanceof Points) {
+        expect(particles.geometry.drawRange.count).toBeGreaterThan(0);
+      }
+      storm.update(255, STORM_MAX_MS - 15_000, cameraPos, true);
+      expect(storm.emissionRate).toBe(0);
       expect(storm.group.visible).toBe(true);
 
       // Disposes cleanly without errors

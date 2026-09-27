@@ -29,7 +29,13 @@ export class GameSession {
       this.prediction.mapId = this.view.mapId;
       this.clock.update(this.view.serverTime);
       for (const player of this.view.players) {
-        if (player.playerId === playerId) this.prediction.reconcile(player, this.canMove(player));
+        if (player.playerId === playerId) {
+          if (player.status !== 'alive') {
+            this.input.reset();
+            this.prediction.reset();
+          }
+          this.prediction.reconcile(player, this.canMove(player));
+        }
         else {
           let motion = this.remotes.get(player.playerId);
           if (!motion) {
@@ -109,7 +115,13 @@ export class GameSession {
 
   private tick(): void {
     const local = this.local();
-    if (!local || !this.isConnected || !isPlayPhase(this.view.phase)) return;
+    if (
+      !local ||
+      local.status !== 'alive' ||
+      !this.isConnected ||
+      !isPlayPhase(this.view.phase)
+    )
+      return;
     const input = this.input.sample();
     const now = this.serverNow();
     const canMove = this.canMove(local) && this.input.isEnabled && !document.hidden;

@@ -64,7 +64,6 @@ try {
         ).consumeSeatReservation<LoadState>(seat.seat);
         room.onMessage('match/phase-changed', () => {});
         for (const type of [
-          'player/respawned',
           'weapon/fired',
           'player/hit',
           'player/killed',

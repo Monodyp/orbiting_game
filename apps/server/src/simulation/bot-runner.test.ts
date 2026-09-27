@@ -4,8 +4,8 @@ import { LobbyController } from '../rooms/lobby-controller.js';
 import { GameplayController } from '../gameplay/gameplay-controller.js';
 import { BotRunner } from './bot-runner.js';
 
-describe('BotRunner and solo playtest', () => {
-  it('populates bots and allows solo host to start countdown when total reaches MIN_PLAYERS', () => {
+describe('BotRunner and freeze-tag practice', () => {
+  it('populates active bot seats so the host can meet the match minimum', () => {
     const state = new LobbyState();
     state.maxPlayers = 6;
     state.hostPlayerId = 'human-host';
@@ -13,7 +13,7 @@ describe('BotRunner and solo playtest', () => {
     // Add human host
     const host = new PlayerState();
     host.playerId = 'human-host';
-    host.displayName = 'Solo Host';
+    host.displayName = 'Freeze Tag Host';
     state.players.set(host.playerId, host);
 
     const gameplay = new GameplayController(state, () => {});
@@ -81,7 +81,7 @@ describe('BotRunner and solo playtest', () => {
     expect(state.players.size).toBe(1);
   });
 
-  it('processes Island bot movement and human fire in the same authoritative tick', () => {
+  it('processes Island bot movement and human tag intent in the same authoritative tick', () => {
     const state = new LobbyState();
     state.mapId = 'island';
     state.maxPlayers = 6;
@@ -90,13 +90,14 @@ describe('BotRunner and solo playtest', () => {
     const host = new PlayerState();
     host.playerId = 'human-host';
     host.displayName = 'Island Host';
-    host.team = 'none';
+    host.team = 'ice';
     state.players.set(host.playerId, host);
 
     const gameplay = new GameplayController(state, () => {}),
       bots = new BotRunner(state, gameplay, 5);
     bots.start();
-    for (const player of state.players.values()) player.team = 'none';
+    for (const player of state.players.values())
+      if (player.isBot) player.team = 'water';
     gameplay.start(1_000);
     const positions = new Map(
       [...state.players.values()].map((player) => [player.playerId, { x: player.x, z: player.z }]),

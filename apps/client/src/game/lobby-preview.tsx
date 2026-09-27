@@ -4,9 +4,9 @@ import {
   loadLobbyCharacterFactories,
   type CharacterInstance,
 } from './character-model.js';
+import { gameplayTeamColor } from './team-colors.js';
 
-export type LobbySection =
-  'main' | 'play' | 'modes' | 'customize' | 'party' | 'profile' | 'settings';
+export type LobbySection = 'main' | 'play' | 'modes' | 'customize' | 'profile' | 'settings';
 
 interface LobbyPreviewProps {
   section: LobbySection;
@@ -25,7 +25,6 @@ const CAMERA_POSES: Record<LobbySection, { position: THREE.Vector3; target: THRE
     position: new THREE.Vector3(3.2, 2.4, 4.65),
     target: new THREE.Vector3(0.24, 1.18, 0),
   },
-  party: { position: new THREE.Vector3(4.05, 2.65, 5.9), target: new THREE.Vector3(0.54, 1.19, 0) },
   profile: {
     position: new THREE.Vector3(3.15, 2.4, 4.7),
     target: new THREE.Vector3(0.23, 1.38, 0),
@@ -386,7 +385,7 @@ class LobbyScene {
       if (!ice || !water) return;
       if (this.isDestroyed) return;
       const lobbyCharacters = [
-        { name: 'lobby-ice-character', factory: ice, color: '#bdefff', x: -0.95, rotation: -0.3 },
+        { name: 'lobby-ice-character', factory: ice, color: gameplayTeamColor('ice'), x: -0.95, rotation: -0.3 },
         { name: 'lobby-water-character', factory: water, color: '#43c6d6', x: 0.95, rotation: 0.3 },
       ];
       for (const definition of lobbyCharacters) {

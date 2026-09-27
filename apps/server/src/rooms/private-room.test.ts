@@ -27,15 +27,11 @@ function fixture(status: PlayerStatus) {
   Object.assign(player, {
     playerId: 'player',
     displayName: 'Player',
-    team: 'none',
+    team: status === 'spectator' ? 'none' : 'water',
+    roleChoice: status === 'spectator' ? 'spectator' : 'random',
     status,
     x: 12,
     z: -7,
-    kills: 3,
-    deaths: 2,
-    ammo: 9,
-    reloadUntil: NOW + 2000,
-    respawnAt: status === 'dead' ? NOW + 2500 : 0,
   });
   room.state.players.set(player.playerId, player);
   const identity: GuestIdentity = {
@@ -54,14 +50,14 @@ function fixture(status: PlayerStatus) {
   );
   return { room, player, client, leave };
 }
-describe('FPS reconnect reservations', () => {
+describe('role and freeze-state reconnect reservations', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
   });
   afterEach(() => vi.useRealTimers());
-  it.each<PlayerStatus>(['alive', 'dead', 'spectator'])(
-    'preserves authoritative %s state, ammo, score and deadlines',
+  it.each<PlayerStatus>(['alive', 'frozen', 'spectator'])(
+    'preserves authoritative %s state, role, position and deadline',
     async (status) => {
       const { room, player, client } = fixture(status);
       await room.onDrop(client);
@@ -72,33 +68,31 @@ describe('FPS reconnect reservations', () => {
         isConnected: true,
         reconnectDeadline: 0,
         status,
-        kills: 3,
-        deaths: 2,
-        ammo: 9,
-        reloadUntil: NOW + 2000,
+        team: status === 'spectator' ? 'none' : 'water',
+        roleChoice: status === 'spectator' ? 'spectator' : 'random',
         x: 12,
         z: -7,
       });
-      if (status === 'dead') expect(player.respawnAt).toBe(NOW + 2500);
     },
   );
   it('rejects expired sessions and reservations without resetting the body', async () => {
-    const { room, player, client, leave } = fixture('dead');
+    const { room, player, client, leave } = fixture('frozen');
     await room.onDrop(client);
     vi.setSystemTime(NOW + 25000);
     room.onReconnect(client);
     expect(leave).toHaveBeenCalledWith(4001);
-    expect(player.status).toBe('dead');
+    expect(player.status).toBe('frozen');
   });
-  it('forfeits to spectator on intentional leave without awarding kills or reviving', () => {
-    const { room, player, client } = fixture('dead');
+  it.each<PlayerStatus>(['alive', 'frozen', 'spectator'])(
+    'does not change a %s role or freeze state on intentional leave',
+    (status) => {
+      const { room, player, client } = fixture(status);
     room.onLeave(client);
     expect(player).toMatchObject({
-      status: 'spectator',
-      isConnected: false,
-      respawnAt: 0,
-      kills: 3,
-      deaths: 2,
-    });
-  });
+        status,
+        team: status === 'spectator' ? 'none' : 'water',
+        isConnected: false,
+      });
+    },
+  );
 });

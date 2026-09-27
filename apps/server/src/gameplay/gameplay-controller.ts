@@ -35,9 +35,14 @@ export class GameplayController {
     this.lastTick = now;
     this.inputs.clear();
     this.latestInputs.clear();
-    for (const p of this.state.players.values()) p.status = 'spectator';
     for (const p of this.state.players.values())
-      if (p.isConnected && p.team !== 'unassigned') this.respawn(p, now, false);
+      if (p.team === 'none') {
+        p.status = 'spectator';
+        p.velocityX = 0;
+        p.velocityZ = 0;
+        p.verticalVelocity = 0;
+      } else if (p.isConnected && (p.team === 'ice' || p.team === 'water'))
+        this.spawn(p, now);
   }
   advance(now: number): void {
     if (!this.hasStarted || now < this.lastTick) return;
@@ -50,6 +55,7 @@ export class GameplayController {
   handle(id: string, type: keyof GameplayMessages, payload: unknown, now: number): string | null {
     const player = this.state.players.get(id);
     if (!player?.isConnected || player.team === 'unassigned') return 'Player is not available';
+    if (player.team === 'none') return 'Spectators cannot perform gameplay actions';
     let budget = this.budgets.get(id);
     if (!budget || now >= budget.resetsAt) {
       budget = { moves: 0, actions: 0, resetsAt: now + 1000 };
@@ -58,6 +64,7 @@ export class GameplayController {
     if (type === 'input/move' ? ++budget.moves > 30 : ++budget.actions > 25)
       return 'Too many gameplay requests';
     if (!this.hasStarted || !this.canPlay(now)) return 'Gameplay is unavailable in this phase';
+    if (player.status === 'spectator') return 'Spectators cannot perform gameplay actions';
     if (type === 'input/move') {
       if (!isMoveInput(payload)) return 'Invalid movement input';
       const previous = this.sequences.get(id) ?? player.inputSequence;
@@ -116,13 +123,26 @@ export class GameplayController {
       p.isSliding = false;
     }
   }
+  /** Applies the ordinary authoritative frozen status for a Blizzard selection. */
+  freezeForBlizzard(target: PlayerState, now: number): void {
+    if (target.team !== 'water' || target.status !== 'alive') return;
+    target.status = 'frozen';
+    target.rescueProgress = 0;
+    target.velocityX = 0;
+    target.velocityZ = 0;
+    target.verticalVelocity = 0;
+    target.isSliding = false;
+    this.emit({
+      type: 'player/frozen',
+      payload: { playerId: target.playerId, attackerId: 'blizzard', serverTime: now },
+    });
+  }
   private canPlay(now: number): boolean {
     return this.state.phase === 'playing' && now < this.state.phaseDeadline;
   }
   private step(now: number): void {
     if (!this.canPlay(now)) return;
     for (const p of this.state.players.values()) {
-      if (p.status === 'dead' && p.isConnected && now >= p.respawnAt) this.respawn(p, now, true);
       if (p.status === 'frozen') {
         this.advanceFrozen(p, now);
         continue;
@@ -226,8 +246,8 @@ export class GameplayController {
     target.verticalVelocity = GAMEPLAY.freezeKnockbackVerticalSpeed;
     target.isGrounded = false;
   }
-  private respawn(p: PlayerState, now: number, isDeath: boolean): void {
-    const spawn = selectSpawn(this.state, p, isDeath ? p : undefined);
+  private spawn(p: PlayerState, now: number): void {
+    const spawn = selectSpawn(this.state, p);
     this.inputs.delete(p.playerId);
     p.inputSequence = this.sequences.get(p.playerId) ?? p.inputSequence;
     // Use islandSupportHeightAt for the island map so the spawn Y correctly
@@ -256,14 +276,9 @@ export class GameplayController {
       isWallRunning: false,
     });
     p.status = 'alive';
-    p.respawnAt = 0;
     p.protectedUntil = now + GAMEPLAY.spawnProtectionMs;
     p.spawnGeneration++;
     p.yaw = Math.atan2(spawn.x, spawn.z);
     p.pitch = 0;
-    this.emit({
-      type: 'player/respawned',
-      payload: { playerId: p.playerId, x: p.x, y: p.y, z: p.z, serverTime: now },
-    });
   }
 }

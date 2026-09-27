@@ -6,6 +6,7 @@ function player(): PlayerView {
     playerId: 'p',
     displayName: 'Player',
     team: 'none',
+    roleChoice: 'random',
     isConnected: true,
     isBot: false,
     reconnectDeadline: 0,
@@ -27,9 +28,7 @@ function player(): PlayerView {
     slideReadyAt: 0,
     kills: 0,
     deaths: 0,
-    respawnAt: 0,
     spawnGeneration: 1,
-    lastKillerId: '',
     ping: 0,
     rescueProgress: 0,
     lungeUntil: 0,
@@ -39,7 +38,7 @@ function player(): PlayerView {
     isWallRunning: false,
   };
 }
-it('replays pending inputs identically to the server and clears prediction on respawn', () => {
+it('replays pending inputs identically to the server and clears prediction on spawn', () => {
   const p = player(),
     prediction = new LocalPrediction();
   prediction.reconcile(p, true);

@@ -59,6 +59,10 @@ export const GAMEPLAY = {
   // ── Match timing ──
   countdownMs: 3000,
   tdmTimeLimitMs: 300_000,
+  /** Round timing is fixed at five minutes. Snow starts at the 1:00 gameplay mark (4:00 remaining). */
+  snowStartRemainingMs: 240_000,
+  /** Blizzard peaks with the heavy snowfall window and then fades the snow visually over 30 seconds. */
+  blizzardStartRemainingMs: 120_000,
   intermissionMs: 8_000,
   warmupMs: 10_000,
 

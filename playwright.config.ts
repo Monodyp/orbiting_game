@@ -20,7 +20,10 @@ export default defineConfig({
       command: 'node node_modules/vite/bin/vite.js apps/client --host 127.0.0.1 --port 5174',
       url: 'http://localhost:5174',
       reuseExistingServer: process.env.PLAYWRIGHT_REUSE_SERVER === 'true',
-      env: { VITE_GAME_SERVER_URL: 'ws://127.0.0.1:2568' },
+      env: {
+        ...process.env,
+        VITE_GAME_SERVER_URL: 'ws://127.0.0.1:2568',
+      },
     },
   ],
 });

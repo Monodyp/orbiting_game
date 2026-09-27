@@ -53,6 +53,7 @@ export function TouchControls({ input }: { input: GameInput }) {
       <div className="touch-actions">
         <button
           className="touch-interact"
+          aria-label="Tag or rescue"
           onPointerDown={(e) => {
             capture(e);
             input.pressInteract();

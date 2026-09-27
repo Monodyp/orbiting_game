@@ -8,7 +8,11 @@ export function Scoreboard({
   localPlayerId: string;
   ping?: number;
 }) {
-  const rows = [...view.players].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+  const teamOrder = { ice: 0, water: 1, none: 2, unassigned: 3 } as const;
+  const rows = [...view.players].sort(
+    (a, b) =>
+      teamOrder[a.team] - teamOrder[b.team] || a.displayName.localeCompare(b.displayName),
+  );
   return (
     <section className="scoreboard" aria-label="Scoreboard">
       <h2>
@@ -18,9 +22,8 @@ export function Scoreboard({
         <thead>
           <tr>
             <th>Player</th>
-            <th>Kills</th>
-            <th>Deaths</th>
-            <th>K/D</th>
+            <th>Role</th>
+            <th>State</th>
             <th>Ping</th>
           </tr>
         </thead>
@@ -30,12 +33,16 @@ export function Scoreboard({
               <td>
                 {p.displayName}
                 {p.playerId === localPlayerId ? ' (you)' : ''}
-                {` · ${p.team}`}
                 {!p.isConnected ? ' · Away' : ''}
               </td>
-              <td>{p.kills}</td>
-              <td>{p.deaths}</td>
-              <td>{(p.kills / Math.max(1, p.deaths)).toFixed(1)}</td>
+              <td>{p.team === 'none' ? 'Spectator' : p.team}</td>
+              <td>
+                {p.status === 'frozen'
+                  ? 'Frozen'
+                  : p.status === 'spectator'
+                    ? 'Spectating'
+                    : 'Active'}
+              </td>
               <td>
                 {p.isBot ? 'Bot' : p.playerId === localPlayerId && ping > 0 ? `${ping} ms` : '—'}
               </td>

@@ -3,6 +3,7 @@ import { matchMaker, type Room as ServerRoom } from '@colyseus/core';
 import { Client, type Room } from '@colyseus/sdk';
 import {
   GAMEPLAY,
+  type ChatMessage,
   type GuestSession,
   type RoomReservation,
   type SessionError,
@@ -73,11 +74,7 @@ async function enter(
   const room: TestRoom = await new Client(url).consumeSeatReservation<TestState>(reservation.seat);
   rooms.push(room);
   room.onMessage('match/phase-changed', () => {});
-  for (const type of [
-    'player/respawned',
-    'match/result',
-  ])
-    room.onMessage(type, () => {});
+  room.onMessage('match/result', () => {});
   await waitFor(() => !!room.state?.players);
   return { room, code: reservation.inviteCode };
 }
@@ -139,6 +136,46 @@ afterAll(async () => {
 });
 
 describe('HTTP and real WebSocket room flow', () => {
+  it('handles guest-session preflights for configured, preview, and Quick Tunnel origins', async () => {
+    for (const origin of [
+      'http://localhost:5173',
+      'http://127.0.0.1:4173',
+      'https://venture-demand-mouse-marion.trycloudflare.com',
+    ]) {
+      const preflight = await fetch(`${url}/api/guest-session`, {
+        method: 'OPTIONS',
+        headers: {
+          Origin: origin,
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers': 'content-type',
+        },
+      });
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers.get('access-control-allow-origin')).toBe(origin);
+      expect(preflight.headers.get('vary')).toBe('Origin');
+      expect(preflight.headers.get('access-control-allow-methods')).toContain('POST');
+      expect(preflight.headers.get('access-control-allow-headers')).toContain('Content-Type');
+
+      const response = await fetch(`${url}/api/guest-session`, {
+        method: 'POST',
+        headers: { Origin: origin, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'CORS Guest' }),
+      });
+      expect(response.status).toBe(201);
+      expect(response.headers.get('access-control-allow-origin')).toBe(origin);
+    }
+
+    const rejectedPreflight = await fetch(`${url}/api/guest-session`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://untrusted.example',
+        'Access-Control-Request-Method': 'POST',
+      },
+    });
+    expect(rejectedPreflight.status).toBe(403);
+    expect(rejectedPreflight.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
   it('reports health and readiness, sanitizes guests, and validates requests', async () => {
     expect((await fetch(`${url}/health`)).status).toBe(200);
     expect((await fetch(`${url}/ready`)).status).toBe(200);
@@ -205,31 +242,105 @@ describe('HTTP and real WebSocket room flow', () => {
     expect((await post('/api/rooms/join', { inviteCode: code }, intruder.token)).status).toBe(409);
     await Promise.all([room, ...others].map((client) => client.leave()));
   });
-  it('allows only the lobby host to select Original World and freezes selection at countdown', async () => {
-    const first = await enter(await guest('Original Host'));
-    const second = await enter(await guest('Original Guest'), first.code);
+  it('defaults rooms and matches to Frostline and rejects other map choices', async () => {
+    const first = await enter(await guest('Frostline Host'));
+    const second = await enter(await guest('Frostline Guest'), first.code);
     try {
+      expect(first.room.state.mapId).toBe('frostline');
+      const frostlineExtent = first.room.state.arenaHalfExtent;
+      const authoritative = authoritativeRoom(first.room);
+
       const unauthorized = new Promise<SessionError>((resolve) =>
         second.room.onMessage('session/error', resolve),
       );
-      second.room.send('room/configure', { mapId: 'original' });
+      second.room.send('room/configure', { mapId: 'frostline' });
       expect((await unauthorized).message).toContain('host');
-      expect(first.room.state.mapId).toBe('frostline');
-      first.room.send('room/configure', { mapId: 'original' });
-      await waitFor(() => second.room.state.mapId === 'original');
-      expect(second.room.state.arenaHalfExtent).toBe(125);
+
+      authoritative.state.mapId = 'original';
+      authoritative.state.arenaHalfExtent = 125;
+      authoritative.broadcastPatch();
+      await waitFor(() => first.room.state.mapId === 'original');
+      first.room.send('room/configure', { mapId: 'frostline' });
+      await waitFor(() => first.room.state.mapId === 'frostline');
+      expect(first.room.state.arenaHalfExtent).toBe(frostlineExtent);
+
+      for (const mapId of ['island', 'original'] as const) {
+        const invalid = new Promise<SessionError>((resolve) =>
+          first.room.onMessage('session/error', resolve),
+        );
+        first.room.send('room/configure', { mapId });
+        expect((await invalid).code).toBe('invalid-message');
+        expect(first.room.state.mapId).toBe('frostline');
+      }
+
       first.room.send('room/start', {});
       await waitFor(() => first.room.state.phase === 'countdown');
-      const frozen = new Promise<SessionError>((resolve) =>
-        first.room.onMessage('session/error', resolve),
-      );
-      first.room.send('room/configure', { mapId: 'island' });
-      await frozen;
-      expect(first.room.state.mapId).toBe('original');
       await waitFor(() => first.room.state.phase === 'playing');
-      expect([...first.room.state.players.values()].every((p) => p.y > 1.5)).toBe(true);
+      expect(first.room.state.mapId).toBe('frostline');
+      expect(first.room.state.arenaHalfExtent).toBe(frostlineExtent);
     } finally {
       await Promise.all([first.room.leave(), second.room.leave()]);
+    }
+  });
+  it('validates chat and broadcasts it only within the active room', async () => {
+    const host = await enter(await guest('Chat Host'));
+    const peer = await enter(await guest('Chat Peer'), host.code);
+    const outside = await enter(await guest('Other Room'));
+    const hostErrors = errorInbox(host.room);
+    const peerErrors = errorInbox(peer.room);
+    const hostMessages: ChatMessage[] = [];
+    const peerMessages: ChatMessage[] = [];
+    const outsideMessages: ChatMessage[] = [];
+    host.room.onMessage<ChatMessage>('chat/message', (message) => hostMessages.push(message));
+    peer.room.onMessage<ChatMessage>('chat/message', (message) => peerMessages.push(message));
+    outside.room.onMessage<ChatMessage>('chat/message', (message) => outsideMessages.push(message));
+
+    try {
+      expect(
+        await sendForError(host.room, hostErrors, 'chat/send', { message: 'Too early' }),
+      ).toMatchObject({ code: 'chat-unavailable' });
+      host.room.send('room/start', {});
+      await waitFor(() => host.room.state.phase === 'playing');
+      const hostPlayer = host.room.state.players.get(host.room.state.hostPlayerId)!;
+      const peerPlayer = [...peer.room.state.players.values()].find(
+        (player) => player.playerId !== peer.room.state.hostPlayerId,
+      )!;
+      expect(hostPlayer.team).not.toBe(peerPlayer.team);
+
+      host.room.send('chat/send', { message: '  Hello\nroom  ' });
+      await waitFor(() => peerMessages.length === 1);
+      expect(peerMessages[0]).toMatchObject({
+        playerId: host.room.state.hostPlayerId,
+        displayName: 'Chat Host',
+        message: 'Hello room',
+      });
+
+      expect(
+        await sendForError(peer.room, peerErrors, 'chat/send', {
+          message: 'x'.repeat(161),
+        }),
+      ).toMatchObject({ code: 'invalid-message' });
+      peer.room.send('chat/send', { message: 'Reply from the other team' });
+      await waitFor(() => hostMessages.length === 2);
+      expect(hostMessages[1]).toMatchObject({
+        playerId: peerPlayer.playerId,
+        displayName: 'Chat Peer',
+        message: 'Reply from the other team',
+      });
+
+      for (let index = 0; index < 4; index++) {
+        host.room.send('chat/send', { message: `Message ${index}` });
+        await waitFor(() => peerMessages.length === index + 3);
+      }
+      expect(peerMessages).toHaveLength(6);
+      expect(
+        await sendForError(host.room, hostErrors, 'chat/send', { message: 'Rate limited' }),
+      ).toMatchObject({ code: 'rate-limit' });
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(outsideMessages).toHaveLength(0);
+    } finally {
+      await Promise.all([host.room.leave(), peer.room.leave(), outside.room.leave()]);
     }
   });
   it('transfers the host on leave and disposes empty invite codes', async () => {
@@ -365,19 +476,16 @@ describe('HTTP and real WebSocket room flow', () => {
     Object.assign(a, { team: 'ice', x: -50, z: -30, y: 0, protectedUntil: 0 });
     Object.assign(b, { team: 'water', x: -50, z: -30.2, y: 0, protectedUntil: 0 });
     actor.room.send('action/interact', {});
-    await waitFor(() => actor.room.state.players.get(target.identity.playerId)?.status === 'frozen');
+    await waitFor(
+      () => actor.room.state.players.get(target.identity.playerId)?.status === 'frozen',
+    );
     const token = target.room.reconnectionToken;
     target.room.reconnection.enabled = false;
     target.room.connection.close(4010);
     await waitFor(() => !b.isConnected);
     const reconnected: TestRoom = await new Client(url).reconnect<TestState>(token);
     rooms.push(reconnected);
-    for (const type of [
-      'player/frozen',
-      'player/rescued',
-      'match/phase-changed',
-      'match/result',
-    ])
+    for (const type of ['player/frozen', 'player/rescued', 'match/phase-changed', 'match/result'])
       reconnected.onMessage(type, () => {});
     await waitFor(
       () => reconnected.state?.players.get(target.identity.playerId)?.status === 'frozen',

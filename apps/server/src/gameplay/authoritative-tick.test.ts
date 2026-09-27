@@ -7,7 +7,7 @@ it('applies only pre-deadline steps and locks gameplay before survival-threshold
   const state = new LobbyState(),
     p = new PlayerState();
   p.playerId = 'p';
-  p.team = 'none';
+  p.team = 'ice';
   state.players.set('p', p);
   const gameplay = new GameplayController(state),
     match = new MatchController(

@@ -7,7 +7,6 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 const MODEL_FACING_OFFSET = 0;
 const CHARACTER_MODEL_SCALE = 0.3;
 const FROZEN_ICE_OVERLAY_SCALE = 0.15;
-
 export type CharacterAnimation =
   | 'Idle'
   | 'Run'

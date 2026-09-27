@@ -12,6 +12,8 @@ export interface ServerConfig {
   maxPlayers: number;
   /** Non-zero only in development. Bots fill seats so solo testing is possible. */
   devBotCount: number;
+  /** Development-only host-team override for local Ice testing. */
+  devForceIce: boolean;
   /** Human seats remaining after development bots reserve part of maxPlayers. */
   maxHumanPlayers: number;
   countdownSeconds: number;
@@ -23,12 +25,41 @@ export function isAllowedClientOrigin(
   origin: string,
   config: Pick<ServerConfig, 'clientOrigin' | 'isProduction'>,
 ): boolean {
-  if (origin === config.clientOrigin || config.isProduction) return origin === config.clientOrigin;
+  if (origin === config.clientOrigin) return true;
+
+  if (config.isProduction) return false;
+
+  let candidate: URL;
+  try {
+    candidate = new URL(origin);
+  } catch {
+    return false;
+  }
+
+  // Allow temporary Cloudflare Quick Tunnel frontends during development.
+  if (
+    candidate.protocol === 'https:' &&
+    (candidate.hostname === 'trycloudflare.com' ||
+      candidate.hostname.endsWith('.trycloudflare.com'))
+  ) {
+    return true;
+  }
+
   const configured = new URL(config.clientOrigin);
   if (!['localhost', '127.0.0.1'].includes(configured.hostname)) return false;
-  const alternate = new URL(configured);
-  alternate.hostname = configured.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
-  return origin === alternate.origin;
+
+  const allowedOrigins = new Set([configured.origin]);
+
+  for (const hostname of ['localhost', '127.0.0.1']) {
+    const localOrigin = new URL(configured);
+    localOrigin.hostname = hostname;
+    allowedOrigins.add(localOrigin.origin);
+
+    localOrigin.port = '4173';
+    allowedOrigins.add(localOrigin.origin);
+  }
+
+  return allowedOrigins.has(origin);
 }
 
 export function loadEnvironment(): void {
@@ -41,6 +72,13 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     const value = env[key] === undefined ? fallback : Number(env[key]);
     if (!Number.isInteger(value) || value < min || value > max) throw new Error(`Invalid ${key}`);
     return value;
+  };
+  const boolean = (key: string, fallback: boolean) => {
+    const value = env[key];
+    if (value === undefined) return fallback;
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    throw new Error(`Invalid ${key}`);
   };
   const secret = env.GUEST_SESSION_SIGNING_SECRET ?? '';
   if (secret.length < 32 || /replace|example/i.test(secret))
@@ -69,6 +107,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   if (requestedDevBotCount > maxPlayers - 1)
     throw new Error('DEV_BOT_COUNT must be at most ROOM_MAX_PLAYERS - 1');
   const devBotCount = isProduction ? 0 : requestedDevBotCount;
+  const devForceIce = !isProduction && boolean('DEV_FORCE_ICE', false);
   return {
     host: env.GAME_SERVER_HOST ?? '127.0.0.1',
     port: integer('GAME_SERVER_PORT', 2567, 0, 65535),
@@ -78,6 +117,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     isProduction,
     maxPlayers,
     devBotCount,
+    devForceIce,
     maxHumanPlayers: maxPlayers - devBotCount,
     countdownSeconds: integer('COUNTDOWN_SECONDS', 5, 1, 30),
     reconnectSeconds: integer('RECONNECT_SECONDS', 25, 20, 30),

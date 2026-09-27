@@ -9,7 +9,6 @@ import type { LobbyState, PlayerState } from '../rooms/lobby-state.js';
 export function selectSpawn(
   state: LobbyState,
   player: PlayerState,
-  lastDeath?: Position,
 ): Position {
   const spawnPoints = spawnPointsForMap(state.mapId);
   let best = spawnPoints[0]!,
@@ -33,7 +32,6 @@ export function selectSpawn(
             : 0),
       );
     }
-    if (lastDeath) score -= Math.max(0, 400 - distanceSquared(spawn, lastDeath));
     if (score > bestScore) {
       best = spawn;
       bestScore = score;

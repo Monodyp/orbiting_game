@@ -1,4 +1,5 @@
 import { GAMEPLAY } from '@ice-water/shared';
+import { GAMEPLAY_TEAM_COLORS } from './team-colors.js';
 import {
   BoxGeometry,
   Euler,
@@ -37,6 +38,7 @@ const RUN_THRESHOLD = GAMEPLAY.moveSpeed * 1.05;
 const HAND_RENDER_ORDER = 10_000;
 const LEFT = -1;
 const RIGHT = 1;
+const INTERACTION_DURATION_SECONDS = 0.24;
 
 interface ArmRig {
   pivot: Group;
@@ -76,9 +78,9 @@ export function firstPersonHandAnimation(motion: FirstPersonHandMotion): FirstPe
 export class FirstPersonHands {
   private readonly root = new Group();
   private readonly arms: readonly [ArmRig, ArmRig];
-  private readonly sleeveMaterial = this.material(0x236581);
+  private readonly sleeveMaterial = this.material(GAMEPLAY_TEAM_COLORS.ice.hex);
   private readonly cuffMaterial = this.material(0x17374a);
-  private readonly handMaterial = this.material(0xc8f4ff);
+  private readonly handMaterial = this.material(GAMEPLAY_TEAM_COLORS.ice.hex);
   private readonly geometries = [
     new BoxGeometry(0.15, 0.34, 0.15),
     new BoxGeometry(0.17, 0.065, 0.17),
@@ -88,6 +90,7 @@ export class FirstPersonHands {
   private readonly targetQuaternion = new Quaternion();
   private gaitPhase = 0;
   private breathingPhase = 0;
+  private interactionRemaining = 0;
   private team: 'ice' | 'water' = 'ice';
 
   constructor(camera: PerspectiveCamera) {
@@ -109,8 +112,22 @@ export class FirstPersonHands {
     const nextTeam = team === 'water' ? 'water' : 'ice';
     if (this.team === nextTeam) return;
     this.team = nextTeam;
-    this.sleeveMaterial.color.setHex(nextTeam === 'water' ? 0x245e88 : 0x236581);
-    this.handMaterial.color.setHex(nextTeam === 'water' ? 0x74d9ec : 0xc8f4ff);
+    this.sleeveMaterial.color.setHex(
+      nextTeam === 'water' ? 0x245e88 : GAMEPLAY_TEAM_COLORS.ice.hex,
+    );
+    this.handMaterial.color.setHex(
+      nextTeam === 'water' ? 0x74d9ec : GAMEPLAY_TEAM_COLORS.ice.hex,
+    );
+  }
+
+  /**
+   * Local-only feedback for an authoritative tag or rescue attempt. The
+   * short window also keeps a held/repeated click from restarting the pose.
+   */
+  playInteraction(): boolean {
+    if (this.interactionRemaining > 0) return false;
+    this.interactionRemaining = INTERACTION_DURATION_SECONDS;
+    return true;
   }
 
   update(
@@ -120,6 +137,7 @@ export class FirstPersonHands {
   ): FirstPersonHandState {
     const animation = firstPersonHandAnimation(motion);
     const delta = MathUtils.clamp(seconds, 0, 0.05);
+    this.interactionRemaining = Math.max(0, this.interactionRemaining - delta);
     const motionScale = reducedEffects ? 0.35 : 1;
     this.breathingPhase = (this.breathingPhase + delta * 2.25) % (Math.PI * 2);
     if (animation.state === 'walk' || animation.state === 'run')
@@ -151,6 +169,8 @@ export class FirstPersonHands {
       color,
       roughness: 0.72,
       metalness: 0,
+      transparent: true,
+      opacity: 1,
       depthTest: false,
       depthWrite: false,
     });
@@ -248,6 +268,15 @@ export class FirstPersonHands {
     if (motion.isCrouching && animation.state !== 'slide') {
       position.y -= 0.018;
       position.x += side * 0.012;
+    }
+    if (side === RIGHT && this.interactionRemaining > 0) {
+      const progress = 1 - this.interactionRemaining / INTERACTION_DURATION_SECONDS;
+      // A quick reach with a smooth return so it layers over movement poses.
+      const reach = Math.sin(progress * Math.PI);
+      position.y += 0.05 * reach;
+      position.z -= 0.24 * reach;
+      rotation.x -= 0.78 * reach;
+      rotation.y -= 0.08 * reach;
     }
     return { position, rotation };
   }

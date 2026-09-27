@@ -238,6 +238,17 @@ export async function startServer(
       response.end();
       return;
     }
+    if (origin) {
+      response.setHeader('Access-Control-Allow-Origin', origin);
+      response.setHeader('Vary', 'Origin');
+      response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      response.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+    }
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204);
+      response.end();
+      return;
+    }
     const path = (request.url ?? '/').split('?')[0] ?? '/';
     const isApi = [
       '/health',

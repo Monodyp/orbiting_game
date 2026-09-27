@@ -31,7 +31,7 @@ interface BotMotion {
  * Dev-only driver for wandering dummy players.
  *
  * Bots are registered as real PlayerState entries in the Colyseus room so
- * every server rule — spawning, freezing, rescue, phase deadlines, elimination
+ * every server rule — spawning, freezing, rescue, and phase deadlines
  * — applies to them exactly as it would to a human player. Their sole
  * behaviour is random movement; they do not throw frost, rescue, or react to game state.
  *
@@ -72,7 +72,7 @@ export class BotRunner {
     if (this.botIds.length === 0) return;
     for (const id of this.botIds) {
       const player = this.state.players.get(id);
-      // Skip if eliminated or frozen — bots cannot self-rescue.
+      // Skip frozen and spectator roles — bots cannot self-rescue.
       if (!player || player.status !== 'alive') continue;
       // Pick a new random direction occasionally.
       let motion = this.motions.get(id);

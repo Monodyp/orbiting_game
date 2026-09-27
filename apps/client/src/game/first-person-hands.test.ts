@@ -71,6 +71,28 @@ describe('first-person hands', () => {
     expect(camera.getObjectByName('first-person-hands')).toBeUndefined();
   });
 
+  it('renders fully opaque hand materials after translucent world effects', () => {
+    const camera = new PerspectiveCamera();
+    const hands = new FirstPersonHands(camera);
+    const parts: { renderOrder: number; material: { transparent: boolean; opacity: number } }[] = [];
+    camera.getObjectByName('first-person-hands')?.traverse((object) => {
+      if ('isMesh' in object && object.isMesh) {
+        const mesh = object as unknown as (typeof parts)[number] & { material: unknown };
+        parts.push({
+          renderOrder: mesh.renderOrder,
+          material: mesh.material as (typeof parts)[number]['material'],
+        });
+      }
+    });
+
+    expect(parts).toHaveLength(6);
+    expect(parts.every((part) => part.material.transparent && part.material.opacity === 1)).toBe(
+      true,
+    );
+    expect(parts.every((part) => part.renderOrder > 100)).toBe(true);
+    hands.destroy();
+  });
+
   it('blends into the slide brace instead of snapping', () => {
     const camera = new PerspectiveCamera();
     const hands = new FirstPersonHands(camera);
@@ -84,6 +106,23 @@ describe('first-person hands', () => {
     for (let index = 0; index < 60; index++)
       hands.update(motion({ isSliding: true, velocityZ: 16 }), 1 / 60);
     expect(before.angleTo(leftArm!.quaternion)).toBeGreaterThan(firstFrameAngle);
+    hands.destroy();
+  });
+
+  it('plays a short right-arm-only interaction reach without changing movement input', () => {
+    const camera = new PerspectiveCamera();
+    const hands = new FirstPersonHands(camera);
+    const left = camera.getObjectByName('first-person-left-arm')!;
+    const right = camera.getObjectByName('first-person-right-arm')!;
+    const leftBefore = left.position.clone();
+    const rightBefore = right.position.clone();
+    expect(hands.playInteraction()).toBe(true);
+    expect(hands.playInteraction()).toBe(false);
+    for (let index = 0; index < 7; index++) hands.update(motion(), 1 / 60);
+    expect(right.position.z).toBeLessThan(rightBefore.z);
+    expect(left.position.distanceTo(leftBefore)).toBeLessThan(0.01);
+    for (let index = 0; index < 30; index++) hands.update(motion(), 1 / 60);
+    expect(hands.playInteraction()).toBe(true);
     hands.destroy();
   });
 

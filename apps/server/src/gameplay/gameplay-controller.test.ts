@@ -22,6 +22,16 @@ function fixture() {
 }
 
 describe('authoritative proximity interactions', () => {
+  it('accepts interaction exactly at the new two-metre boundary', () => {
+    const { ice, water, controller } = fixture();
+    expect(GAMEPLAY.interactionRange).toBe(2);
+    water.z = -GAMEPLAY.interactionRange;
+    expect(distanceSquared3d(ice, water)).toBe(GAMEPLAY.interactionRange ** 2);
+
+    expect(controller.handle(ice.playerId, 'action/interact', {}, 1_000)).toBeNull();
+    expect(water.status).toBe('frozen');
+  });
+
   it('freezes a Water player when Ice interacts within 1 metre', () => {
     const { ice, water, controller, events } = fixture();
 
@@ -39,13 +49,16 @@ describe('authoritative proximity interactions', () => {
     );
   });
 
-  it('does not freeze a Water player beyond the interaction range', () => {
+  it.each([GAMEPLAY.interactionRange + 0.01, 5])(
+    'does not freeze a Water player at the old or farther range (%s metres)',
+    (distance) => {
     const { ice, water, controller } = fixture();
-    water.z = -(GAMEPLAY.interactionRange + 0.01);
+    water.z = -distance;
 
     expect(controller.handle(ice.playerId, 'action/interact', {}, 2_000)).toBeNull();
     expect(water.status).toBe('alive');
-  });
+    },
+  );
 
   it('unfreezes a frozen Water teammate with the same proximity interaction', () => {
     const { state, water, controller, events } = fixture();
@@ -137,5 +150,55 @@ describe('authoritative proximity interactions', () => {
     controller.advance(2_050);
     expect(ice.lungeDirectionX).toBe(1);
     expect(ice.lungeDirectionZ).toBe(0);
+  });
+});
+
+describe('pre-game spectator role', () => {
+  it('keeps a lobby-selected spectator out of gameplay when the match starts', () => {
+    const state = new LobbyState();
+    state.phase = 'playing';
+    state.phaseDeadline = 300_000;
+    const spectator = new PlayerState();
+    const water = new PlayerState();
+    Object.assign(spectator, { playerId: 'spectator', team: 'none', roleChoice: 'spectator' });
+    Object.assign(water, { playerId: 'water', team: 'water' });
+    state.players.set(spectator.playerId, spectator);
+    state.players.set(water.playerId, water);
+    const controller = new GameplayController(state);
+
+    controller.start(1_000);
+
+    expect(spectator).toMatchObject({ team: 'none', roleChoice: 'spectator', status: 'spectator' });
+    expect(water).toMatchObject({ team: 'water', status: 'alive', spawnGeneration: 1 });
+  });
+
+  it('rejects movement, tag, and lunge intents from a lobby-selected spectator', () => {
+    const { ice, water, controller } = fixture();
+    ice.team = 'none';
+    ice.roleChoice = 'spectator';
+    ice.status = 'spectator';
+
+    expect(
+      controller.handle(
+        ice.playerId,
+        'input/move',
+        { x: 1, z: 0, sequence: 1, slide: true, sprint: true },
+        2_000,
+      ),
+    ).toContain('Spectators');
+    expect(controller.handle(ice.playerId, 'action/interact', {}, 2_000)).toContain('Spectators');
+    expect(controller.handle(ice.playerId, 'action/lunge', {}, 2_000)).toContain('Spectators');
+    expect(water.status).toBe('alive');
+    expect(ice.lungeUntil).toBe(0);
+    expect(ice.isSliding).toBe(false);
+  });
+
+  it('keeps frozen Water players in the frozen game state', () => {
+    const { water, controller } = fixture();
+    water.status = 'frozen';
+
+    controller.advance(1_050);
+
+    expect(water.status).toBe('frozen');
   });
 });

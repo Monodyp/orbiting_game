@@ -6,6 +6,7 @@ it('validates secrets, capacity, reconnection windows, and production transport 
   expect(readConfig(valid)).toMatchObject({
     maxPlayers: 150,
     devBotCount: 0,
+    devForceIce: false,
     maxHumanPlayers: 150,
     countdownSeconds: 5,
     reconnectSeconds: 25,
@@ -18,6 +19,7 @@ it('validates secrets, capacity, reconnection windows, and production transport 
     { ROOM_MAX_PLAYERS: '6', DEV_BOT_COUNT: '6' },
     { ROOM_MAX_PLAYERS: '100', DEV_BOT_COUNT: '100' },
     { DEV_BOT_COUNT: '150' },
+    { DEV_FORCE_ICE: 'yes' },
     { RECONNECT_SECONDS: '19' },
     { RECONNECT_SECONDS: '31' },
     { COUNTDOWN_SECONDS: '0' },
@@ -28,6 +30,19 @@ it('validates secrets, capacity, reconnection windows, and production transport 
     { DATABASE_URL: 'http://db.example' },
   ])
     expect(() => readConfig({ ...valid, ...override })).toThrow();
+});
+
+it('allows forcing only a development host onto Ice', () => {
+  expect(readConfig({ ...valid, DEV_FORCE_ICE: 'true' }).devForceIce).toBe(true);
+  expect(
+    readConfig({
+      ...valid,
+      NODE_ENV: 'production',
+      CLIENT_ORIGIN: 'https://game.example',
+      DATABASE_URL: 'postgresql://localhost/game',
+      DEV_FORCE_ICE: 'true',
+    }).devForceIce,
+  ).toBe(false);
 });
 
 it('reserves bot seats from room capacity while retaining at least one human seat', () => {
@@ -62,6 +77,22 @@ it('allows either loopback hostname during local development only', () => {
   const config = readConfig({ ...valid, CLIENT_ORIGIN: 'http://localhost:5173' });
   expect(isAllowedClientOrigin('http://localhost:5173', config)).toBe(true);
   expect(isAllowedClientOrigin('http://127.0.0.1:5173', config)).toBe(true);
+  expect(isAllowedClientOrigin('http://localhost:4173', config)).toBe(true);
+  expect(isAllowedClientOrigin('http://127.0.0.1:4173', config)).toBe(true);
+  const tunnelOrigin = 'https://venture-demand-mouse-marion.trycloudflare.com';
+  expect(isAllowedClientOrigin(tunnelOrigin, config)).toBe(true);
+  expect(
+    isAllowedClientOrigin(tunnelOrigin, {
+      ...config,
+      isProduction: true,
+    }),
+  ).toBe(false);
+  expect(
+    isAllowedClientOrigin('http://127.0.0.1:4173', {
+      ...config,
+      isProduction: true,
+    }),
+  ).toBe(false);
   expect(
     isAllowedClientOrigin('http://127.0.0.1:5173', {
       ...config,

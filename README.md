@@ -1,8 +1,8 @@
 # Ice Ice Water!
 
-A browser arena FPS with desktop and mobile touch controls, private invite rooms, and server-authoritative combat.
+Ice Ice Water is a browser freeze-tag game with desktop and mobile controls, private invite rooms, and server-authoritative movement, roles, freezing, and rescue.
 
-The implementation plan's FPS pivot is implemented as a playable prototype: Frostline, Frost Island, and Original World arenas, movement/jump/swim/slide/crouch/sprint, six weapons, reload/ADS/headshots, death/respawn, FFA/TDM/duel scoring, settings, scoreboard, sound cues, and PostgreSQL summaries. Frost Island is a 160-metre combat archipelago with a central Fort/Cryogenic Core battlefield and specialized outer islands. Freeze-tag is replaced; historical specifications and superseded sources/tests are retained for reference.
+The FPS proposal in `implementation_plan.md` is obsolete and is not part of the game. Ice and Water are active roles; Spectator is an explicit lobby choice. Frozen Water remains a participant and can be rescued. Spectators are not assigned to either team, cannot send gameplay actions, and watch by switching between connected Ice/Water players. Frostline is the only map players can select or play; retained alternate map implementations and assets are not exposed in rooms.
 
 ## Run locally
 
@@ -18,27 +18,25 @@ npm run dev
 
 Open **http://localhost:5173** (or **http://127.0.0.1:5173**). Server: **127.0.0.1:2567**. Keep the terminal running. On PowerShell, use `npm.cmd` if `npm.ps1` is blocked. Setup creates an ignored `.env` and preserves an existing one. Never put secrets in browser-visible `VITE_` variables.
 
-The existing local database uses port 55432. Docker must be running. If port 5432 is reserved, set both `POSTGRES_PORT` and the port in `DATABASE_URL` to 55432. `db:down` retains data. Gameplay runs without PostgreSQL, but summary writes fail and `/ready` reports 503. Migrations 003/004/005 add FPS tables and map identity, including Original World while preserving freeze-tag history.
+The existing local database uses port 55432. Docker must be running. If port 5432 is reserved, set both `POSTGRES_PORT` and the port in `DATABASE_URL` to 55432. `db:down` retains data. Gameplay runs without PostgreSQL, but summary writes fail and `/ready` reports 503. Migrations 003/004/005 add match-summary tables and map identity while preserving historical data.
 
 ## Play
 
-1. Choose a name, select a mode and primary weapon, then create a private room.
-2. Share the eight-character invite code before starting.
-3. One player can start solo practice. FFA ends at 30 kills/five minutes; TDM at 50 team kills/five minutes; duel at 10 kills/three minutes and allows at most two players.
-4. Death respawns after 2.5 seconds. Spawn protection lasts 1.5 seconds and ends on firing.
-5. Results display for eight seconds, then the room closes. Create a new room for another match.
+1. Choose a name and create or join a private Frostline room with its eight-character invite code.
+2. Choose `Random` or `User picks` team assignment, then select `ICE`, `WATER`, or `SPECTATOR` before countdown.
+3. At least two connected Ice/Water players are required. Spectators do not count toward team balancing or match minimums.
+4. Ice freezes nearby Water with left-click; Water rescues frozen teammates with the same interaction. Frozen players cannot move but remain on Water and can be rescued.
+5. Ice wins when all Water players are frozen. Spectators watch and can switch between connected Ice/Water players. Results appear after the match.
 
-**Desktop:** click Enter arena for mouse lock; WASD/arrows move; mouse aims; Space jumps; Shift slides; C crouches; Control sprints; left-click fires; right-click aims; R reloads; 1/2/3 or wheel switches weapons; hold Tab for scores; Esc releases the cursor.
+**Desktop:** WASD/arrows move; mouse aims; Space jumps; Shift sprints; C slides; RMB lunges; left-click tags or interacts; hold Tab for scores; Esc releases the cursor. Spectators switch views with the on-screen controls or arrow keys.
 
-**Mobile:** movement stick, drag-to-look area, Fire, Aim, Jump, Slide, Reload, Weapon, Scores, Crouch, Sprint. Controls support simultaneous fingers and portrait/landscape. Settings offers Automatic/Touch/Keyboard and mouse if device detection is unreliable. Look sensitivity, FOV, volume, crosshair color, and reduced effects persist locally.
+**Mobile:** movement stick, drag-to-look area, Tag / Rescue, Lunge, Jump, Slide, Scores, Crouch / Dive, and Sprint. Controls support simultaneous fingers and portrait/landscape. Spectators use Previous / Next controls to switch views. Settings offers Automatic/Touch/Keyboard and mouse if device detection is unreliable.
 
-Primary choices: Frost AR, Ice Spray SMG, Glacier Pump shotgun, Icicle sniper. Every loadout also carries Snowmelt pistol and Ice Pick. Values are initial playtest tuning.
-
-Host transfers on departure. Fresh joins close at countdown. Unexpected disconnects reserve identity for 25 seconds by default; reload/reconnect restores health, ammo, score, position, and deadlines. Reserved bodies remain vulnerable; respawn waits for connection. Expired or intentional departures become spectators and cannot rejoin that match.
+Host transfers on departure. Fresh joins close at countdown. Unexpected disconnects reserve identity for 25 seconds by default; reload/reconnect preserves role, position, freeze state, and match deadlines. Disconnecting or leaving never changes a player into the Spectator role.
 
 ## Development bots
 
-Optional `DEV_BOT_COUNT=5` fills five seats with wandering targets. Bots have normal authoritative health/death/respawn but do not shoot; solo practice does not require them. Bots reserve room capacity and always leave one human seat. Production disables them.
+Optional `DEV_BOT_COUNT=5` fills five seats with wandering Ice/Water participants. Bots use the normal authoritative movement, freeze, and rescue rules. Bots reserve room capacity and always leave one human seat. Production disables them.
 
 ## Commands and checks
 
@@ -46,7 +44,7 @@ Optional `DEV_BOT_COUNT=5` fills five seats with wandering targets. Bots have no
 | -------------------------- | ------------------------------------------------------------------------- |
 | `npm run dev`              | Client and authoritative server                                           |
 | `npm test`                 | Rules, real WebSocket security/lifecycle, database integration            |
-| `npm run test:e2e`         | Desktop and mobile join/play/combat/results/settings flows                |
+| `npm run test:e2e`         | Lobby, role assignment, freeze/rescue, spectator, and mobile flows         |
 | `npm run test:load`        | 20/50/100/150-client five-second gameplay smoke checks                    |
 | `npm run test:load -- 150` | One staged population                                                     |
 | `npm run lint`             | ESLint and Prettier                                                       |
@@ -77,18 +75,18 @@ Database tests require `TEST_DATABASE_URL` pointing at a disposable database; ne
 | `POSTGRES_PASSWORD` / `POSTGRES_PORT`   | Local Compose credentials/port                                     |
 | `TEST_DATABASE_URL`                     | Optional isolated test database                                    |
 
-`ICE_COUNT_BRACKETS` is obsolete. TDM balances teams at countdown completion. Weapon/movement/match tuning lives in shared constants. Production requires HTTPS/WSS with a trusted TLS proxy and private raw game port. No hosting is configured.
+Ice/Water team balancing excludes selected Spectators. Movement and match tuning lives in shared constants. Production requires HTTPS/WSS with a trusted TLS proxy and private raw game port. No hosting is configured.
 
 Routes remain `/health`, `/ready`, `POST /api/guest-session`, `POST /api/rooms`, `POST /api/rooms/join`. Room APIs require a signed guest token; public Colyseus matchmaking remains blocked.
 
 ## Sources of truth
 
-[PRD](PRD.md), [architecture](ARCHITECTURE.md), [map specification](MAP_SPEC.md), [art direction](ART_DIRECTION.md), [implementation status](implementation_plan.md), [tasks and verification](TASKS.md), [agent rules](AGENTS.md), [contributing](CONTRIBUTING.md).
+[PRD](PRD.md), [architecture](ARCHITECTURE.md), [map specification](MAP_SPEC.md), [art direction](ART_DIRECTION.md), [tasks and verification](TASKS.md), [agent rules](AGENTS.md), [contributing](CONTRIBUTING.md). The FPS `implementation_plan.md` is obsolete.
 
-`apps/client` renders and captures input; `apps/server` owns outcomes; `packages/shared` holds safe types/constants/pure simulation; `tests` holds browser/load scenarios. Original procedural weapons/facility/combat audio and Frost Island archipelago geometry ship alongside the authorized Fort derivative. The supplied wooden-house source is retained for provenance but is not used at runtime. Lobby character/music are retained project assets. Embedded source/license metadata and outstanding permission evidence are recorded; see [asset provenance](assets/asset-provenance.md).
+`apps/client` renders and captures input; `apps/server` owns outcomes; `packages/shared` holds safe types/constants/pure simulation; `tests` holds browser/load scenarios. Frostline and retained map assets follow the existing provenance and permission records; see [asset provenance](assets/asset-provenance.md).
 
 Contributors: Chad Bojelador and Franco Perez.
 
 ## Restored first map
 
-Choose **Original World** in the Map selector before creating a room, or change it as host while the room is in the lobby. This restores the first village/forest/crystal/mountain/meadow/beach layout from GitHub commit 87a8893 alongside the existing FPS maps. Apply migration 005 with npm run db:migrate so its completed matches can be saved. When editing its topology or renderer, regenerate shared collision with npm run assets:original.
+Original World geometry and assets are retained for internal reference, but are not selectable or playable. Frostline is the only available map. When maintaining retained Original World topology or rendering, regenerate shared collision with `npm run assets:original`.

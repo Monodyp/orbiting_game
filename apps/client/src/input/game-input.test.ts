@@ -39,7 +39,7 @@ it('clamps mouse look and clears one-shot and held input on reset', () => {
   expect(input.sample().hasInteraction).toBe(false);
 });
 
-it('uses the Original World PC bindings for slide, crouch, and sprint', () => {
+it('uses browser-standard desktop bindings for sprint, slide, and crouch', () => {
   vi.stubGlobal('HTMLElement', class HTMLElement {});
   const target = fakeWindow();
   const input = new GameInput();
@@ -47,17 +47,55 @@ it('uses the Original World PC bindings for slide, crouch, and sprint', () => {
   const unbind = input.bind(target);
 
   dispatchKey(target, 'keydown', 'ShiftLeft');
-  expect(input.sample()).toMatchObject({ slide: true, crouch: false, sprint: false });
-  expect(input.sample().slide).toBe(false);
+  expect(input.sample()).toMatchObject({ slide: false, crouch: false, sprint: true });
   dispatchKey(target, 'keyup', 'ShiftLeft');
 
   dispatchKey(target, 'keydown', 'KeyC');
-  expect(input.sample()).toMatchObject({ slide: false, crouch: true, sprint: false });
+  expect(input.sample()).toMatchObject({ slide: true, crouch: false, sprint: false });
+  expect(input.sample().slide).toBe(false);
   dispatchKey(target, 'keyup', 'KeyC');
 
   dispatchKey(target, 'keydown', 'ControlLeft');
-  expect(input.sample()).toMatchObject({ slide: false, crouch: false, sprint: true });
+  expect(input.sample()).toMatchObject({ slide: false, crouch: true, sprint: false });
   dispatchKey(target, 'keyup', 'ControlLeft');
+
+  dispatchKey(target, 'keydown', 'KeyQ');
+  expect(input.sample().hasLunge).toBe(false);
+  dispatchKey(target, 'keyup', 'KeyQ');
+
+  dispatchPointer(target, 0);
+  expect(input.sample().hasLunge).toBe(false);
+  dispatchPointer(target, 2);
+  expect(input.sample().hasLunge).toBe(true);
 
   unbind();
 });
+
+it('maps dedicated touch inputs to movement and every required gameplay action', () => {
+  const input = new GameInput();
+  input.touch = { x: 0.6, z: -0.8 };
+  input.isTouchSprinting = true;
+  input.pressSlide();
+  input.pressLunge();
+  input.pressInteract();
+  input.pressJump();
+
+  expect(input.sample()).toMatchObject({
+    x: 0.6,
+    z: -0.8,
+    sprint: true,
+    slide: true,
+    hasLunge: true,
+    hasInteraction: true,
+    jump: true,
+  });
+});
+
+function dispatchPointer(target: Window, button: number): void {
+  const event = new Event('pointerdown', { cancelable: true });
+  Object.defineProperties(event, {
+    button: { value: button },
+    pointerType: { value: 'mouse' },
+  });
+  target.dispatchEvent(event);
+}

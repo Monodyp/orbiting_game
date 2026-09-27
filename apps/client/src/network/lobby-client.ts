@@ -11,7 +11,13 @@ interface WireLobby extends Omit<LobbyView, 'players'> {
   players: { values(): IterableIterator<PlayerView> };
 }
 export type LobbyRoom = Room<unknown, WireLobby>;
-const endpoint = new URL(import.meta.env.VITE_GAME_SERVER_URL || 'ws://localhost:2567');
+function resolveGameServerUrl(): string {
+  const configured = (import.meta.env.VITE_GAME_SERVER_URL ?? 'ws://127.0.0.1:2567').trim();
+  const isLocalHost = ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname);
+  const isEphemeralTunnel = /trycloudflare\.com|discordsays\.com/i.test(configured);
+  return isLocalHost && isEphemeralTunnel ? 'ws://127.0.0.1:2567' : configured;
+}
+const endpoint = new URL(resolveGameServerUrl());
 if (!['ws:', 'wss:'].includes(endpoint.protocol)) throw new Error('Invalid game server URL');
 if (location.protocol === 'https:' && endpoint.protocol !== 'wss:')
   throw new Error('Secure pages require a secure game server');
@@ -113,17 +119,22 @@ export function snapshot(state: WireLobby): LobbyView {
     minPlayers: state.minPlayers,
     arenaHalfExtent: state.arenaHalfExtent,
     gameMode: state.gameMode,
+    roleAssignmentMode: state.roleAssignmentMode,
     mapId: state.mapId,
     iceScore: state.iceScore,
     waterScore: state.waterScore,
     waterStartedCount: state.waterStartedCount,
     waterUnfrozenCount: state.waterUnfrozenCount,
+    snowStarted: state.snowStarted,
+    blizzardEnabled: state.blizzardEnabled,
+    blizzardStarted: state.blizzardStarted,
     matchWinner: state.matchWinner,
     resultReason: state.resultReason,
     players: [...state.players.values()].map((p) => ({
       playerId: p.playerId,
       displayName: p.displayName,
       team: p.team,
+      roleChoice: p.roleChoice,
       isConnected: p.isConnected,
       isBot: p.isBot,
       reconnectDeadline: p.reconnectDeadline,
@@ -145,9 +156,7 @@ export function snapshot(state: WireLobby): LobbyView {
       slideReadyAt: p.slideReadyAt,
       kills: p.kills,
       deaths: p.deaths,
-      respawnAt: p.respawnAt,
       spawnGeneration: p.spawnGeneration,
-      lastKillerId: p.lastKillerId,
       ping: p.ping,
       rescueProgress: p.rescueProgress,
       lungeUntil: p.lungeUntil,

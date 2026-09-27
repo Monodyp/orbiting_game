@@ -2,10 +2,11 @@ import { Room, ServerError, type AuthContext, type Client } from '@colyseus/core
 import { randomUUID } from 'node:crypto';
 import {
   GAMEPLAY,
+  MAX_CHAT_MESSAGE_LENGTH,
   arenaHalfExtentForMap,
   isEmptyPayload,
   isRecord,
-  isMapId,
+  type ChatMessage,
   type GameplayMessages,
   type MatchResult,
 } from '@ice-water/shared';
@@ -13,7 +14,7 @@ import type { GuestIdentity, GuestSessions } from '../auth/guest-session.js';
 import { RateLimiter } from '../auth/rate-limiter.js';
 import type { ServerConfig } from '../config/environment.js';
 import { isAllowedClientOrigin } from '../config/environment.js';
-import { LobbyController } from './lobby-controller.js';
+import { isRoleAssignmentMode, isRoleChoice, LobbyController } from './lobby-controller.js';
 import { LobbyState, PlayerState } from './lobby-state.js';
 import type { RoomDirectory } from './room-directory.js';
 import { GameplayController } from '../gameplay/gameplay-controller.js';
@@ -33,8 +34,14 @@ export interface RoomDependencies {
 export function createPrivateRoom({ config, sessions, directory, database }: RoomDependencies) {
   return class PrivateRoom extends Room<{ state: LobbyState; client: GuestClient }> {
     override state = new LobbyState();
-    private readonly controller = new LobbyController(this.state, config.countdownSeconds * 1000);
+    private readonly controller = new LobbyController(
+      this.state,
+      config.countdownSeconds * 1000,
+      undefined,
+      config.devForceIce,
+    );
     private readonly actions = new RateLimiter(4, 1000);
+    private readonly chatRate = new RateLimiter(5, 5000);
     private readonly matchId = randomUUID();
     private readonly gameplay = new GameplayController(this.state, (event) =>
       this.broadcast(event.type, event.payload),
@@ -47,6 +54,7 @@ export function createPrivateRoom({ config, sessions, directory, database }: Roo
         onResult: (result, startedAt, completedAt) =>
           this.persistResult(result, startedAt, completedAt),
         onResultExpired: () => this.cleanupCompletedMatch(),
+        freezeForBlizzard: (player, now) => this.gameplay.freezeForBlizzard(player, now),
       },
     );
     private readonly bots: BotRunner | null =
@@ -93,6 +101,38 @@ export function createPrivateRoom({ config, sessions, directory, database }: Roo
           this.match.tick(now);
           if (error) this.fail(client, 'invalid-action', error);
         });
+      this.onMessage('chat/send', (client: GuestClient, payload: unknown) => {
+        if (!client.auth || client.auth.expiresAt <= Date.now())
+          return this.fail(client, 'unauthorized', 'Guest session expired');
+        if (this.state.phase !== 'playing')
+          return this.fail(client, 'chat-unavailable', 'Chat is available during a match');
+        if (!this.chatRate.take(client.sessionId))
+          return this.fail(client, 'rate-limit', 'Slow down before sending another chat message');
+        if (
+          !isRecord(payload) ||
+          Object.keys(payload).length !== 1 ||
+          typeof payload.message !== 'string' ||
+          payload.message.length > MAX_CHAT_MESSAGE_LENGTH
+        )
+          return this.fail(client, 'invalid-message', 'Invalid chat message');
+
+        const message = payload.message
+          .replace(/[\u0000-\u001f\u007f]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (!message || message.length > MAX_CHAT_MESSAGE_LENGTH)
+          return this.fail(client, 'invalid-message', 'Invalid chat message');
+
+        const player = this.state.players.get(client.auth.playerId);
+        if (!player) return this.fail(client, 'unauthorized', 'Player is not in this room');
+        const chatMessage: ChatMessage = {
+          playerId: player.playerId,
+          displayName: player.displayName,
+          message,
+          serverTime: Date.now(),
+        };
+        this.broadcast('chat/message', chatMessage);
+      });
       this.onMessage('room/start', (client: GuestClient, payload: unknown) => {
         if (!this.actions.take(client.sessionId))
           return this.fail(client, 'rate-limit', 'Slow down and try again');
@@ -115,14 +155,36 @@ export function createPrivateRoom({ config, sessions, directory, database }: Roo
         if (
           !isRecord(payload) ||
           Object.keys(payload).length < 1 ||
-          Object.keys(payload).some((key) => key !== 'mapId') ||
-          (payload.mapId !== undefined && !isMapId(payload.mapId))
+          Object.keys(payload).some((key) => !['mapId', 'roleAssignmentMode'].includes(key)) ||
+          (payload.mapId !== undefined && payload.mapId !== 'frostline') ||
+          (payload.roleAssignmentMode !== undefined &&
+            !isRoleAssignmentMode(payload.roleAssignmentMode))
         )
           return this.fail(client, 'invalid-message', 'Invalid room configuration');
-        if (payload.mapId !== undefined) {
-          this.state.mapId = payload.mapId;
-          this.state.arenaHalfExtent = arenaHalfExtentForMap(payload.mapId);
+        if (payload.mapId === 'frostline') {
+          this.state.mapId = 'frostline';
+          this.state.arenaHalfExtent = arenaHalfExtentForMap('frostline');
         }
+        if (payload.roleAssignmentMode !== undefined)
+          this.state.roleAssignmentMode = payload.roleAssignmentMode;
+        this.broadcastPatch();
+      });
+      this.onMessage('room/role', (client: GuestClient, payload: unknown) => {
+        if (!client.auth || client.auth.expiresAt <= Date.now())
+          return this.fail(client, 'unauthorized', 'Guest session expired');
+        if (!this.actions.take(client.sessionId))
+          return this.fail(client, 'rate-limit', 'Slow down and try again');
+        if (this.state.phase !== 'lobby')
+          return this.fail(client, 'cannot-configure', 'Role choices are locked');
+        if (!isRecord(payload) || Object.keys(payload).length !== 1 || !isRoleChoice(payload.role))
+          return this.fail(client, 'invalid-message', 'Invalid role choice');
+        const player = this.state.players.get(client.auth.playerId);
+        if (!player) return this.fail(client, 'unauthorized', 'Player is not in this room');
+        player.roleChoice =
+          payload.role !== 'spectator' && this.state.roleAssignmentMode === 'random'
+            ? 'random'
+            : payload.role;
+        this.broadcastPatch();
       });
       this.onMessage('session/ping', (client: GuestClient, payload: unknown) => {
         if (
@@ -237,11 +299,7 @@ export function createPrivateRoom({ config, sessions, directory, database }: Roo
         if (player) {
           player.isConnected = false;
           player.reconnectDeadline = 0;
-          if (player.status === 'alive' || player.status === 'dead') {
-            player.status = 'spectator';
-            player.protectedUntil = 0;
-            player.respawnAt = 0;
-          }
+          if (player.status === 'alive') player.protectedUntil = 0;
         }
       }
       directory.release(identity.sessionId, this.roomId);
@@ -324,3 +382,4 @@ export function createPrivateRoom({ config, sessions, directory, database }: Roo
     }
   };
 }
+

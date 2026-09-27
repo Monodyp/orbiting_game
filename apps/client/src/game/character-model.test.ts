@@ -1,6 +1,20 @@
 import { AnimationClip, Group, VectorKeyframeTrack } from 'three';
 import { describe, expect, it } from 'vitest';
-import { CharacterModelFactory, findCharacterClip, FrozenIceFactory } from './character-model.js';
+import {
+  CharacterModelFactory,
+  findCharacterClip,
+  FrozenIceFactory,
+} from './character-model.js';
+import { GAMEPLAY_TEAM_COLORS, gameplayTeamColor } from './team-colors.js';
+
+it('uses white for Ice while retaining the existing Water color', () => {
+  expect(GAMEPLAY_TEAM_COLORS).toEqual({
+    ice: { hex: 0xffffff, css: '#FFFFFF' },
+    water: { hex: 0x43c6d6, css: '#43c6d6' },
+  });
+  expect(gameplayTeamColor('ice')).toBe('#FFFFFF');
+  expect(gameplayTeamColor('water')).toBe('#43c6d6');
+});
 
 describe('findCharacterClip', () => {
   it('selects the default idle clip instead of FallingIdle', () => {

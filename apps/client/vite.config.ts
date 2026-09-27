@@ -6,5 +6,8 @@ export default defineConfig({
   envDir: '../..',
   // Only the explicitly supplied character directory is served as runtime GLB assets.
   publicDir: '../../assets/character',
-  server: { strictPort: true },
+  server: {
+  strictPort: true,
+  allowedHosts: true,
+},
 });

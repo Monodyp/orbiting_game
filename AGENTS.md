@@ -4,7 +4,7 @@ These instructions apply to all AI coding agents working in this repository. Mor
 
 ## Project overview
 
-Ice Ice Water! is a browser-only first-person arena FPS with keyboard/mouse and mobile touch support. Private invite rooms allow solo practice and up to 150 players; duel caps at two. Frostline and Island - Fort host FFA, balanced-team TDM, and duel with server-authoritative health, weapons, deaths, respawns, and scores. The 2026-09-14 implementation-plan pivot replaces freeze-tag; archived documents do not define current behavior.
+Ice Ice Water! is a browser freeze-tag game with desktop and mobile touch support. Private invite rooms allow up to 150 total members; at least two active Ice/Water players are required to start. Frostline is the only map available to players. Before countdown, each player selects ICE, WATER, or SPECTATOR. Frozen Water remains a participant and can be rescued; there is no elimination, death, or respawn mechanic. Spectators are an explicit non-participating role.
 
 ## Sources of truth
 
@@ -12,7 +12,7 @@ Ice Ice Water! is a browser-only first-person arena FPS with keyboard/mouse and 
 - `ARCHITECTURE.md`: technical structure and decisions
 - `ART_DIRECTION.md`: visual language, asset sourcing, and generation prompts
 - `TASKS.md`: current work and status
-- `implementation_plan.md`: approved FPS execution status and follow-ups
+- `implementation_plan.md`: obsolete FPS proposal; do not implement it
 - `MAP_SPEC.md`: Frostline/Island layouts and shared geometry
 - `AGENTS.md`: AI-agent working rules
 
@@ -65,21 +65,21 @@ Respect the module responsibilities in `ARCHITECTURE.md`. Do not create alternat
 - Constants: `UPPER_SNAKE_CASE` only for true module-level constants
 - Boolean values: use `is`, `has`, `can`, or `should` prefixes
 - Database tables and columns: `snake_case`
-- Colyseus messages: lowercase `domain/action`, such as `action/shoot`
+- Colyseus messages: lowercase `domain/action`, such as `action/interact`
 - Tests: `<unit>.test.ts` for unit/integration tests and `<flow>.spec.ts` for browser tests
 
 ## Architecture rules
 
-- The server is authoritative for position, aim, stance, health, ammo, cooldowns, hits, deaths, respawns, scores, phase deadlines, and results.
+- The server is authoritative for position, movement stance, role/team, freeze/rescue state, cooldowns, spectator eligibility, phase deadlines, and results.
 - Clients send input and action intent, never trusted outcomes.
 - One active match belongs to one Colyseus room and one server process.
 - Live room state remains in memory; do not persist per-tick state to PostgreSQL.
 - `packages/shared` may contain protocol types, constants, and pure utilities only.
 - The client and server must not import directly from one another.
 - Disable player-to-player physical collision unless the PRD and architecture are intentionally revised.
-- Reject gameplay at/after the match deadline and all actions from dead or spectator players. Reject legacy freeze-tag messages.
-- Keep weapon, movement, respawn and mode balance in shared configuration. Record tuning decisions; TDM balances teams, with no Ice-count brackets.
-- Pass the selected map through movement, prediction, spawn height/visibility, and hitscan. Regenerate Island assets with `npm run assets:island`; never independently rescale the rendered mesh or edit generated triangle data.
+- Reject gameplay at/after the match deadline and all actions from role spectators. Frozen Water cannot move but remains a participant and can be rescued.
+- Keep movement, freeze/rescue, and team balance in shared configuration. Spectators do not count toward active minimums, Ice quotas, Water counts, or win conditions.
+- Pass the selected map through movement, prediction, spawn height, and visibility. Regenerate Island assets with `npm run assets:island`; never independently rescale the rendered mesh or edit generated triangle data.
 - Preserve original supplied GLBs and asset attribution. Keep documented permission gaps visible until reviewed.
 - Optimize only after measurement, except for established 150-player constraints documented in the architecture.
 - Never change architecture or introduce a major dependency without documenting the reason, alternatives, and consequences in `ARCHITECTURE.md`.
@@ -130,7 +130,7 @@ These commands are a required scaffold contract. Until package manifests exist, 
 - Treat every client payload as hostile.
 - Validate session tokens, message shape, ranges, rates, cooldowns, and current phase.
 - Sanitize display names and any user-visible input.
-- Rate-limit session creation, joins, gameplay actions, loadout changes, and ping messages.
+- Rate-limit session creation, joins, gameplay actions, role changes, and ping messages.
 - Use HTTPS and secure WebSockets outside local development.
 - Do not log tokens, connection strings, secrets, or unnecessary personal data.
 - Do not implement client-authoritative shortcuts, even temporarily, without isolating them to explicit local test fixtures.
@@ -142,8 +142,8 @@ These commands are a required scaffold contract. Until package manifests exist, 
 - Unit-test pure game rules and boundary cases.
 - Integration-test room lifecycle, invalid messages, reconnection, and database writes.
 - Test phase deadlines with controlled/fake time rather than slow real-time waits.
-- Test exact match deadlines, death credit once, spawn protection, reload/ammo conservation, reconnection continuity, and rejected client-forged hits.
-- Include browser tests for join, play, shooting, damage, death, respawn, scoreboard, and results.
+- Test role validation, spectator-excluded team balancing, freeze/rescue rules, deadlines, reconnect continuity, and spectator gameplay rejection.
+- Include browser tests for lobby role selection, join/play, movement, tag/rescue, spectator viewing, scoreboard, results, and mobile controls.
 - Add load scenarios progressively at 20, 50, 100, and 150 clients.
 - A change is not complete until relevant tests, lint, type checking, and builds pass, or the handoff clearly documents why they could not run.
 - Never weaken or delete a failing test merely to make a change pass unless the requirement itself changed and the source-of-truth documents were updated.
@@ -173,11 +173,11 @@ These commands are a required scaffold contract. Until package manifests exist, 
 - Summarize changed files, verification performed, and remaining risks in the final handoff.
 
 
-## FPS implementation notes
+## Freeze-tag implementation notes
 
 - Keep mobile input parity and portrait/landscape controls. Reset held intent on blur, disconnect, hidden tabs, pointer cancellation, and pointer-lock loss.
-- FPS source types replace the old protocol; client and server must deploy together. Files ending in `.freeze-tag-backup` and `docs/archive` are historical, not a supported alternate mode or test suite.
-- Use the selected map's shared geometry for collision, prediction, rendering, and shot occlusion. No untracked decorative cover. Island spawn generation must verify a clear exit, not just a clear standing point; retain ledge-support and low-ceiling regression coverage.
-- The database uses additive FPS summary tables; do not edit checksummed historical migrations.
+- The role protocol accepts exactly `ice`, `water`, and `spectator`; `random` is only the internal unselected team preference. Validate role messages server-side.
+- Use selected-map shared geometry for collision, prediction, and rendering. No untracked decorative cover. Island spawn generation must verify a clear exit, not just a clear standing point; retain ledge-support and low-ceiling regression coverage.
+- Treat `implementation_plan.md` as obsolete. Do not add health, weapons, duel, solo-start, elimination, or respawn behavior to satisfy stale FPS tests or documents.
 - Browser tests may control authoritative state only inside their test worker fixture. Never ship test control endpoints or trust browser outcomes.
 - Same-process five-second load smoke checks do not establish full-match capacity, 20 Hz server throughput, or mobile rendering FPS. Report limits accurately.

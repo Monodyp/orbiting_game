@@ -5,7 +5,6 @@ import {
   type GameMode,
   type GuestSession,
   type LobbyView,
-  type MapId,
 } from '@ice-water/shared';
 import type { LobbyRoom } from '../network/lobby-client.js';
 import type { FpsSettings } from '../game/fps-settings.js';
@@ -27,7 +26,7 @@ interface LobbyScreenProps {
   settings: FpsSettings;
   onSettings: (settings: FpsSettings) => void;
   onIdentify: (name: string) => void;
-  onCreate: (mode: GameMode, mapId: MapId) => void;
+  onCreate: () => void;
   onJoin: (code: string) => void;
   onLeave: () => void;
   onForgetGuest: () => void;
@@ -39,7 +38,7 @@ const MODE_DETAILS: Record<GameMode, { name: string; summary: string; limit: str
   tdm: {
     name: 'Ice Ice Water',
     summary: 'Ice and Water squads collide.',
-    limit: '50 team eliminations · 5:00',
+    limit: '5 minutes · Freeze and rescue',
   },
 };
 
@@ -48,31 +47,28 @@ export function LobbyScreen(props: LobbyScreenProps) {
   const [section, setSection] = useState<LobbySection>(guest ? 'play' : 'main');
   const [name, setName] = useState(''),
     [code, setCode] = useState(''),
-    [mode, setMode] = useState<GameMode>('tdm'),
-    [mapId, setMapId] = useState<MapId>('frostline');
-  const [copy, setCopy] = useState('Copy invite code'),
-    [isSocialOpen, setSocialOpen] = useState(false);
+    [mode, setMode] = useState<GameMode>('tdm');
+  const [copy, setCopy] = useState('Copy invite code');
   const previousGuest = useRef(guest?.playerId),
     previousRoom = useRef(room);
 
   useEffect(() => {
     if (guest && !previousGuest.current) setSection('play');
-    if (room && !previousRoom.current) setSection('party');
+    if (room && !previousRoom.current) setSection('play');
     if (!room && previousRoom.current) setSection('play');
     previousGuest.current = guest?.playerId;
     previousRoom.current = room;
   }, [guest, room]);
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && section !== 'main' && section !== 'play' && section !== 'party')
-        setSection(room ? 'party' : 'play');
+      if (event.key === 'Escape' && section !== 'main' && section !== 'play') setSection('play');
     };
     window.addEventListener('keydown', escape);
     return () => window.removeEventListener('keydown', escape);
   }, [room, section]);
 
   const navigate = (next: LobbySection) => {
-    setSection(room && next === 'play' ? 'party' : next);
+    setSection(next);
     props.onUiCue(next === 'play' ? 'deploy' : 'select');
   };
   const identify = (event: FormEvent) => {
@@ -89,7 +85,6 @@ export function LobbyScreen(props: LobbyScreenProps) {
     const invite = normalizeInviteCode(code);
     props.onJoin(invite ?? code);
   };
-  const connected = view?.players.filter((player) => player.isConnected) ?? [];
   const hover = (event: React.PointerEvent<HTMLElement>) => {
     if ((event.target as Element).closest('button,select,input')) props.onUiCue('hover');
   };
@@ -202,8 +197,6 @@ export function LobbyScreen(props: LobbyScreenProps) {
             guest={guest}
             mode={mode}
             setMode={setMode}
-            mapId={mapId}
-            setMapId={setMapId}
             code={code}
             setCode={setCode}
             settings={settings}
@@ -212,7 +205,7 @@ export function LobbyScreen(props: LobbyScreenProps) {
             onSection={navigate}
             onCreate={() => {
               props.onUiCue('deploy');
-              props.onCreate(mode, mapId);
+              props.onCreate();
             }}
             onJoin={join}
             onForget={props.onForgetGuest}
@@ -225,57 +218,9 @@ export function LobbyScreen(props: LobbyScreenProps) {
         )}
       </section>
 
-      {guest && (
-        <PartyDock
-          guest={guest}
-          view={view}
-          connected={connected}
-          onOpen={() => navigate('party')}
-        />
-      )}
-      {guest && (
-        <aside className={`social-drawer${isSocialOpen ? ' is-open' : ''}`}>
-          <button
-            className="social-toggle"
-            aria-expanded={isSocialOpen}
-            onClick={() => setSocialOpen((open) => !open)}
-          >
-            <span>Social</span>
-            <i>{connected.length || '—'}</i>
-          </button>
-          {isSocialOpen && (
-            <div className="social-content">
-              <div className="panel-kicker">Comms channel</div>
-              <h2>Social</h2>
-              {connected.length > 1 ? (
-                <>
-                  <p>Operators in this room</p>
-                  <ul>
-                    {connected
-                      .filter((player) => player.playerId !== guest.playerId)
-                      .map((player) => (
-                        <li key={player.playerId}>
-                          <span className="status-dot" />
-                          {player.displayName}
-                          <small>{player.isBot ? 'Practice bot' : 'Connected'}</small>
-                        </li>
-                      ))}
-                  </ul>
-                </>
-              ) : (
-                <p>
-                  Friend discovery is not connected in this private playtest. Share a room code to
-                  assemble a party.
-                </p>
-              )}
-            </div>
-          )}
-        </aside>
-      )}
     </main>
   );
 }
-
 function NavButton({
   label,
   section,
@@ -289,7 +234,7 @@ function NavButton({
   onClick: (section: LobbySection) => void;
   accent?: boolean;
 }) {
-  const isActive = current === section || (section === 'play' && current === 'party');
+  const isActive = current === section;
   return (
     <button
       className={`${accent ? 'nav-primary ' : 'nav-item '}${isActive ? 'is-active' : ''}`}
@@ -301,7 +246,6 @@ function NavButton({
     </button>
   );
 }
-
 function IdentityPanel({
   name,
   setName,
@@ -344,14 +288,11 @@ function IdentityPanel({
     </>
   );
 }
-
 interface SoloPanelProps {
   section: LobbySection;
   guest: GuestSession;
   mode: GameMode;
   setMode: (mode: GameMode) => void;
-  mapId: MapId;
-  setMapId: (map: MapId) => void;
   code: string;
   setCode: (code: string) => void;
   settings: FpsSettings;
@@ -415,16 +356,8 @@ function SoloPanel(props: SoloPanelProps) {
         </select>
       </div>
       <div className="field-row">
-        <label htmlFor="map-choice">Map</label>
-        <select
-          id="map-choice"
-          value={props.mapId}
-          onChange={(event) => props.setMapId(event.target.value as MapId)}
-        >
-          <option value="frostline">Frostline</option>
-          <option value="island">Frost Island</option>
-          <option value="original">Original World</option>
-        </select>
+        <label>Map</label>
+        <strong>Frostline</strong>
       </div>
       <button
         className="primary deployment-button"
@@ -477,7 +410,10 @@ interface RoomAwareProps {
 function RoomAwarePanel(props: RoomAwareProps) {
   const { section, view, guest, room } = props,
     isHost = view.hostPlayerId === guest.playerId,
-    count = view.players.filter((player) => player.isConnected).length;
+    connectedPlayers = view.players.filter((player) => player.isConnected),
+    count = connectedPlayers.length,
+    participantCount = connectedPlayers.filter((player) => player.roleChoice !== 'spectator').length,
+    localPlayer = connectedPlayers.find((player) => player.playerId === guest.playerId);
   if (section === 'modes')
     return (
       <GameModePanel
@@ -493,7 +429,7 @@ function RoomAwarePanel(props: RoomAwareProps) {
       <SettingsPanel
         value={props.settings}
         onChange={props.onSettings}
-        onClose={() => props.onSection('party')}
+        onClose={() => props.onSection('play')}
         isEmbedded
       />
     );
@@ -538,52 +474,111 @@ function RoomAwarePanel(props: RoomAwareProps) {
         </select>
       </div>
       <div className="field-row">
-        <label htmlFor="room-map">Map</label>
-        <select
-          id="room-map"
-          value={view.mapId}
-          disabled={!isHost || view.phase !== 'lobby'}
-          onChange={(event) => room.send('room/configure', { mapId: event.target.value as MapId })}
-        >
-          <option value="frostline">Frostline</option>
-          <option value="island">Frost Island</option>
-          <option value="original">Original World</option>
-        </select>
+        <label>Map</label>
+        <strong>Frostline</strong>
       </div>
-      <ul className="roster">
-        {view.players.map((player) => (
-          <li key={player.playerId}>
-            <span>
-              <i className={`roster-state${player.isConnected ? ' is-online' : ''}`} />
-              {player.displayName}
-            </span>
-            <small>
-              {player.playerId === view.hostPlayerId
-                ? 'Party leader'
-                : player.isBot
-                  ? 'Practice bot'
-                  : player.isConnected
-                    ? 'Automatic team assignment at match start'
-                    : 'Away'}
-            </small>
-          </li>
-        ))}
-      </ul>
+      <section className="role-assignment" aria-label="Role assignment">
+        <div className="panel-kicker">ROLE</div>
+        <div className="role-mode-selector" role="group" aria-label="Role assignment mode">
+          <button
+            type="button"
+            aria-pressed={view.roleAssignmentMode === 'random'}
+            disabled={!isHost || view.phase !== 'lobby'}
+            onClick={() => room.send('room/configure', { roleAssignmentMode: 'random' })}
+          >
+            Random
+          </button>
+          <button
+            type="button"
+            aria-pressed={view.roleAssignmentMode === 'user-picks'}
+            disabled={!isHost || view.phase !== 'lobby'}
+            onClick={() => room.send('room/configure', { roleAssignmentMode: 'user-picks' })}
+          >
+            User picks
+          </button>
+        </div>
+        <div className="role-choice">
+          <div className="role-choice-selector" role="group" aria-label="Your role choice">
+            {(['ice', 'water', 'spectator'] as const).map((role) => (
+              <button
+                type="button"
+                key={role}
+                aria-pressed={localPlayer?.roleChoice === role}
+                disabled={
+                  view.phase !== 'lobby' ||
+                  !localPlayer ||
+                  (view.roleAssignmentMode === 'random' && role !== 'spectator')
+                }
+                onClick={() =>
+                  room.send('room/role', {
+                    role:
+                      role === 'spectator' && localPlayer?.roleChoice === 'spectator'
+                        ? 'ice'
+                        : role,
+                  })
+                }
+              >
+                {role === 'ice'
+                  ? 'Ice'
+                  : role === 'water'
+                    ? 'Water'
+                    : `Spectator: ${localPlayer?.roleChoice === 'spectator' ? 'ON' : 'OFF'}`}
+              </button>
+            ))}
+          </div>
+          <small>
+            {localPlayer?.roleChoice === 'spectator'
+              ? 'You will watch this match and cannot join either team.'
+              : view.roleAssignmentMode === 'random'
+                ? 'Active players are assigned randomly; Spectator is always opt-in.'
+                : 'Your Ice or Water choice is balanced with the room.'}
+          </small>
+        </div>
+      </section>
+      <section className="room-roster" aria-label="Players in room">
+        <div className="panel-kicker">Players</div>
+        <ul className="roster">
+          {connectedPlayers.map((player) => {
+            const isLocal = player.playerId === guest.playerId;
+            const isRoomHost = player.playerId === view.hostPlayerId;
+            const roleLabel =
+              player.team === 'none' || player.roleChoice === 'spectator'
+                ? 'SPECTATOR'
+                : player.team === 'ice' || player.team === 'water'
+                  ? player.team.toUpperCase()
+                  : view.roleAssignmentMode === 'user-picks' && player.roleChoice !== 'random'
+                    ? `PREFERS ${player.roleChoice.toUpperCase()}`
+                    : 'RANDOM';
+            return (
+              <li className={isLocal ? 'is-local' : undefined} key={player.playerId}>
+                <span className="roster-name">
+                  <i className="roster-state is-online" />
+                  {player.displayName}
+                  {isLocal && <strong>You</strong>}
+                </span>
+                <small>
+                  {roleLabel} · {isRoomHost ? 'Room host' : player.isBot ? 'Practice bot' : 'Connected'}
+                </small>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
       {isHost ? (
         <button
           className="primary deployment-button"
-          disabled={view.phase !== 'lobby' || count < view.minPlayers}
+          disabled={view.phase !== 'lobby' || participantCount < view.minPlayers}
           onClick={() => room.send('room/start', {})}
         >
           <span>Start countdown</span>
-          <small>{count === 1 ? 'Solo practice ready' : 'Close room and deploy party'}</small>
+          <small>Lock the room and deploy</small>
         </button>
       ) : (
-        <p className="waiting-state">Waiting for the party leader to deploy.</p>
+        <p className="waiting-state">Waiting for the room host to deploy.</p>
       )}
       <small>
-        {count === 1
-          ? 'Start solo to learn the map, or share the invite code.'
+        {participantCount < view.minPlayers
+          ? 'At least two Ice or Water players are required to start.'
           : 'New joins close when the countdown starts.'}
       </small>
       <button className="text-button" onClick={props.onLeave} disabled={props.isBusy}>
@@ -704,52 +699,3 @@ function ProfilePanel({ guest }: { guest: GuestSession }) {
   );
 }
 
-function PartyDock({
-  guest,
-  view,
-  connected,
-  onOpen,
-}: {
-  guest: GuestSession;
-  view: LobbyView | null | undefined;
-  connected: LobbyView['players'];
-  onOpen: () => void;
-}) {
-  const members = view
-    ? [...connected]
-        .sort((left, right) =>
-          left.playerId === guest.playerId ? -1 : right.playerId === guest.playerId ? 1 : 0,
-        )
-        .slice(0, 4)
-    : [
-        {
-          playerId: guest.playerId,
-          displayName: guest.displayName,
-          isConnected: true,
-          isBot: false,
-        },
-      ];
-  return (
-    <section className="party-dock" aria-label="Your party">
-      <button className="party-label" onClick={onOpen}>
-        <small>Your party</small>
-        <strong>{members.length} / 4</strong>
-      </button>
-      <div className="party-members">
-        {members.map((member) => (
-          <button key={member.playerId} onClick={onOpen}>
-            <span>{member.displayName.slice(0, 1).toUpperCase()}</span>
-            <small>{member.displayName}</small>
-            <i className="status-dot" />
-          </button>
-        ))}
-        {Array.from({ length: Math.max(0, 4 - members.length) }, (_, index) => (
-          <span className="party-slot" key={index}>
-            <i>+</i>
-            <small>{view ? 'Open slot' : 'Invite code'}</small>
-          </span>
-        ))}
-      </div>
-    </section>
-  );
-}

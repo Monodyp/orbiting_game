@@ -1,4 +1,6 @@
-# Arena FPS Implementation Status
+# Obsolete FPS Proposal
+
+> This document is historical and is not a source of product requirements. Do not implement its FPS, weapons, health, duel, solo-start, elimination, or respawn scope. The current product is the ICE/WATER/SPECTATOR freeze-tag game defined in `PRD.md` and `ARCHITECTURE.md`.
 
 The original seven-phase plan is archived at `docs/archive/approved-fps-implementation-plan.md`. This file records the executed scope and remaining release work. `PRD.md` and `ARCHITECTURE.md` are the current product and technical sources of truth.
 

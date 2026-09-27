@@ -34,17 +34,29 @@ import {
   type FrozenIceInstance,
   type GameplayCharacterFactories,
 } from './character-model.js';
+import { GAMEPLAY_TEAM_COLORS, gameplayTeamColor } from './team-colors.js';
 import { HitEffects } from './hit-effects.js';
 import { AudioManager, landingIntensity } from '../audio/audio-manager.js';
 import { readSettings, type FpsSettings } from './fps-settings.js';
 import { renderPixelRatio } from './render-performance.js';
-import { matchEnvironmentFor, matchNightProgress } from './match-night.js';
+import {
+  iceVisionDomeProgress,
+  ICE_VISION_RADIUS,
+  matchEnvironmentFor,
+  matchNightProgress,
+} from './match-night.js';
 import {
   createPlayerNameplate,
   disposePlayerNameplate,
   setNameplateTone,
 } from './player-nameplate.js';
 import { Snowstorm } from './snowstorm.js';
+import { createFrozenRescueMarker, disposeFrozenRescueMarker } from './frozen-rescue-marker.js';
+import {
+  cycleSpectatorTarget,
+  resolveSpectatorTarget,
+  spectatorCameraPose,
+} from './spectator-target.js';
 
 const DAY_SKY_LIGHT = new Color(0xedfaff);
 const NIGHT_SKY_LIGHT = new Color(0x748cc7);
@@ -52,12 +64,14 @@ const DAY_GROUND_LIGHT = new Color(0x41617b);
 const NIGHT_GROUND_LIGHT = new Color(0x101c31);
 const DAY_KEY_LIGHT = new Color(0xfff0d0);
 const NIGHT_KEY_LIGHT = new Color(0xa9c8ff);
+const ICE_NIGHT_FOG_NEAR = 10;
 
 export class GameScene {
   readonly session: GameSession;
   settings: FpsSettings = readSettings();
   isLocked = false;
   isPaused = false;
+  spectatorTargetId: string | undefined;
   get isMapReady(): boolean {
     return !this.island || this.island.isReady;
   }
@@ -72,6 +86,23 @@ export class GameScene {
       innerWidth <= 800 ||
       innerHeight <= 500
     );
+  }
+  setSpectatorTarget(playerId?: string): string | undefined {
+    this.spectatorTargetId = resolveSpectatorTarget(this.session.view.players, playerId)?.playerId;
+    return this.spectatorTargetId;
+  }
+  getSpectatorTarget() {
+    return this.setSpectatorTarget(this.spectatorTargetId)
+      ? this.session.view.players.find((player) => player.playerId === this.spectatorTargetId)
+      : undefined;
+  }
+  cycleSpectatorTarget(direction: -1 | 1): string | undefined {
+    this.spectatorTargetId = cycleSpectatorTarget(
+      this.session.view.players,
+      this.spectatorTargetId,
+      direction,
+    )?.playerId;
+    return this.spectatorTargetId;
   }
   private readonly scene = new Scene();
   private readonly camera = new PerspectiveCamera(96, 1, 0.05, 320);
@@ -90,6 +121,7 @@ export class GameScene {
   private snowstorm?: Snowstorm;
   private readonly players = new Map<string, Group>();
   private readonly nameplates = new Map<string, Sprite>();
+  private readonly frozenRescueMarkers = new Map<string, Sprite>();
   private readonly materials = new Map<string, MeshStandardMaterial>();
   private characterFactories: GameplayCharacterFactories = {};
   private readonly characters = new Map<string, CharacterInstance>();
@@ -124,11 +156,12 @@ export class GameScene {
     private readonly onMapStatusChange?: () => void,
   ) {
     this.session = new GameSession(room, playerId);
-    this.nightProgress = matchNightProgress(
-      this.session.view.mapId,
-      this.session.view.phaseDeadline - this.session.serverNow(),
-      this.settings.reducedEffects,
-    );
+    this.nightProgress = this.session.view.phase === 'playing'
+      ? matchNightProgress(
+          this.session.view.mapId,
+          this.session.view.phaseDeadline - this.session.serverNow(),
+        )
+      : 0;
     this.renderer = new WebGLRenderer({
       canvas,
       antialias: !this.isTouch,
@@ -226,6 +259,8 @@ export class GameScene {
     this.materials.forEach((m) => m.dispose());
     this.nameplates.forEach(disposePlayerNameplate);
     this.nameplates.clear();
+    this.frozenRescueMarkers.forEach(disposeFrozenRescueMarker);
+    this.frozenRescueMarkers.clear();
     this.characters.clear();
     this.frozenIce.clear();
     this.characterAnimations.clear();
@@ -236,7 +271,7 @@ export class GameScene {
     const input = this.session.input;
     const lock = () => {
       this.isLocked = document.pointerLockElement === this.canvas;
-      input.isEnabled = !this.isPaused;
+      input.isEnabled = !this.isPaused && this.session.local()?.status === 'alive';
       if (!this.isLocked) input.reset();
     };
     const down = (e: PointerEvent) => {
@@ -245,7 +280,14 @@ export class GameScene {
       if (!this.isLocked) {
         this.lock();
       }
-      if (e.button === 0) input.pressInteract();
+      if (e.button === 0) {
+        input.pressInteract();
+        const player = this.session.local();
+        // This is immediate visual feedback only; GameSession still sends an
+        // empty intent and the server decides whether a tag/rescue is valid.
+        if (player?.status === 'alive' && this.session.canMove(player))
+          this.hands.playInteraction();
+      }
     };
     const up = (e: PointerEvent) => {
       if (e.pointerType === 'touch') return;
@@ -254,14 +296,27 @@ export class GameScene {
       if (this.isLocked) input.look(e.movementX, e.movementY);
     };
     const context = (e: Event) => e.preventDefault();
+    const spectatorNavigation = (event: KeyboardEvent) => {
+      if (this.session.local()?.team !== 'none') return;
+      const direction =
+        event.code === 'BracketLeft' || event.code === 'ArrowLeft'
+          ? -1
+          : event.code === 'BracketRight' || event.code === 'ArrowRight'
+            ? 1
+            : undefined;
+      if (!direction) return;
+      event.preventDefault();
+      this.cycleSpectatorTarget(direction);
+    };
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (document.pointerLockElement === this.canvas) document.exitPointerLock();
       this.isLocked = false;
       input.reset();
-      input.isEnabled = !this.isPaused;
+      input.isEnabled = !this.isPaused && this.session.local()?.status === 'alive';
     };
     window.addEventListener('keydown', escape);
+    window.addEventListener('keydown', spectatorNavigation);
     this.canvas.addEventListener('pointerdown', down);
     window.addEventListener('pointerup', up);
     document.addEventListener('mousemove', move);
@@ -271,6 +326,7 @@ export class GameScene {
     window.addEventListener('pointerdown', unlockAudio, { once: true });
     this.cleanups.push(() => {
       window.removeEventListener('keydown', escape);
+      window.removeEventListener('keydown', spectatorNavigation);
       this.canvas.removeEventListener('pointerdown', down);
       window.removeEventListener('pointerup', up);
       document.removeEventListener('mousemove', move);
@@ -328,7 +384,10 @@ export class GameScene {
   ): void {
     if (!factory) return;
     const fallback = [...model.children];
-    const character = factory.instantiate(player.team === 'water' ? '#43c6d6' : '#bdefff', 'Idle');
+    const character = factory.instantiate(
+      gameplayTeamColor(player.team === 'water' ? 'water' : 'ice'),
+      'Idle',
+    );
     // Gameplay uses the opposite facing from the lobby's display pose.
     character.root.rotation.y = Math.PI;
     fallback.forEach((child) => child.removeFromParent());
@@ -357,6 +416,24 @@ export class GameScene {
       isCameraUnderwater,
       this.nightProgress,
     );
+    const remainingMs = this.session.view.phaseDeadline - this.session.serverNow();
+    const localTeam = this.session.local()?.team;
+    const isIcePlayer = localTeam === 'ice';
+    const domeIntensity =
+      !isCameraUnderwater && isIcePlayer
+        ? iceVisionDomeProgress(this.session.view.mapId, remainingMs)
+        : 0;
+    const isIceNight = isIcePlayer && domeIntensity > 0;
+    const fogColor = isIceNight
+      ? new Color(environment.fogColor).lerp(new Color(0x000000), domeIntensity).getHex()
+      : environment.fogColor;
+    const fogNear = isIceNight
+      ? environment.fogNear + (ICE_NIGHT_FOG_NEAR - environment.fogNear) * domeIntensity
+      : environment.fogNear;
+    const fogFar = isIceNight
+      ? environment.fogFar + (ICE_VISION_RADIUS - environment.fogFar) * domeIntensity
+      : environment.fogFar;
+
     const background = this.scene.background instanceof Color ? this.scene.background : new Color();
     background.setHex(environment.background);
     this.scene.background = background;
@@ -364,10 +441,10 @@ export class GameScene {
       if (this.scene.fog instanceof FogExp2) this.scene.fog.color.setHex(environment.fogColor);
       else this.scene.fog = new FogExp2(environment.fogColor, 0.0032);
     } else if (this.scene.fog instanceof Fog) {
-      this.scene.fog.color.setHex(environment.fogColor);
-      this.scene.fog.near = environment.fogNear;
-      this.scene.fog.far = environment.fogFar;
-    } else this.scene.fog = new Fog(environment.fogColor, environment.fogNear, environment.fogFar);
+      this.scene.fog.color.setHex(fogColor);
+      this.scene.fog.near = fogNear;
+      this.scene.fog.far = fogFar;
+    } else this.scene.fog = new Fog(fogColor, fogNear, fogFar);
     this.cloudSky?.setUnderwater(isCameraUnderwater);
   }
   private applyMatchLighting(): void {
@@ -384,13 +461,13 @@ export class GameScene {
       p = session.local(),
       serverNow = session.serverNow(),
       input = session.input;
-    if (session.view.phase === 'playing')
-      this.nightProgress = matchNightProgress(
+    this.nightProgress = session.view.phase === 'playing'
+      ? matchNightProgress(
         session.view.mapId,
         session.view.phaseDeadline - serverNow,
-        this.settings.reducedEffects,
-      );
-    input.isEnabled = !this.isPaused;
+      )
+      : 0;
+    input.isEnabled = !this.isPaused && p?.status === 'alive';
     input.sensitivity = this.settings.sensitivity * 0.002;
     this.audio.volume = this.settings.isMuted
       ? 0
@@ -404,13 +481,26 @@ export class GameScene {
         p.status !== 'alive',
       );
       const eye = this.cameraMotion.update(pos, predicted, seconds, this.settings.reducedEffects);
-      this.camera.position.set(eye.x, eye.y, eye.z);
-      this.camera.rotation.order = 'YXZ';
-      this.camera.rotation.set(input.cameraPitch, input.cameraYaw, 0);
+      let cameraYaw = input.cameraYaw;
+      const spectatorTarget = p.team === 'none' ? this.getSpectatorTarget() : undefined;
+      if (spectatorTarget) {
+        const targetPosition =
+          session.remotes.get(spectatorTarget.playerId)?.at(serverNow - GAMEPLAY.interpolationMs) ??
+          spectatorTarget;
+        const pose = spectatorCameraPose(targetPosition);
+        cameraYaw = pose.yaw;
+        this.camera.position.set(pose.position.x, pose.position.y, pose.position.z);
+        this.camera.lookAt(pose.lookAt.x, pose.lookAt.y, pose.lookAt.z);
+      } else {
+        this.camera.position.set(eye.x, eye.y, eye.z);
+        this.camera.rotation.order = 'YXZ';
+        this.camera.rotation.set(input.cameraPitch, input.cameraYaw, 0);
+      }
       this.hands.setVisible(p.status === 'alive' || p.status === 'frozen');
       this.hands.setTeam(p.team);
       this.hands.update(predicted, seconds, this.settings.reducedEffects);
-      const cameraIsUnderwater = isUnderwater(eye, session.view.mapId);
+      const cameraPosition = this.camera.position;
+      const cameraIsUnderwater = isUnderwater(cameraPosition, session.view.mapId);
       if (cameraIsUnderwater !== this.wasUnderwater) {
         this.wasUnderwater = cameraIsUnderwater;
         this.audio.setUnderwater(cameraIsUnderwater);
@@ -418,7 +508,7 @@ export class GameScene {
       const fov = this.settings.fov;
       this.camera.fov += (fov - this.camera.fov) * (1 - Math.exp(-18 * seconds));
       this.camera.updateProjectionMatrix();
-      this.audio.listener(eye, input.cameraYaw);
+      this.audio.listener(cameraPosition, cameraYaw);
       if (p.status === 'alive') {
         const isLunging = p.lungeUntil > serverNow;
         if (isLunging && p.lungeUntil !== this.previousLocalLungeUntil) this.audio.play('lunge');
@@ -471,11 +561,13 @@ export class GameScene {
         this.setCharacterAnimation(remote, animation);
         character.update(seconds);
         character.material.color.setHex(
-          remote.status === 'frozen' ? 0xbdefff : remote.team === 'water' ? 0x43c6d6 : 0x74d9ec,
+          remote.status === 'frozen'
+            ? 0xbdefff
+            : GAMEPLAY_TEAM_COLORS[remote.team === 'water' ? 'water' : 'ice'].hex,
         );
       }
       this.previousStatuses.set(remote.playerId, remote.status);
-      model.visible = remote.status !== 'dead' && remote.status !== 'spectator';
+      model.visible = remote.status !== 'spectator';
       const position =
         session.remotes.get(remote.playerId)?.at(serverNow - GAMEPLAY.interpolationMs) ?? remote;
       model.position.set(position.x, position.y, position.z);
@@ -497,7 +589,9 @@ export class GameScene {
             ? 0xbdefff
             : key === 'protected'
               ? 0xf3b747
-              : friend
+              : remote.team === 'ice'
+                ? GAMEPLAY_TEAM_COLORS.ice.hex
+                : friend
                 ? 0x308cad
                 : 0xe96958,
         );
@@ -512,6 +606,20 @@ export class GameScene {
           position.z,
         );
         setNameplateTone(nameplate, key);
+      }
+      let rescueMarker = this.frozenRescueMarkers.get(remote.playerId);
+      const shouldShowFrozenMarker = p?.team === 'water' && remote.team === 'water' && remote.status === 'frozen';
+      if (shouldShowFrozenMarker) {
+        if (!rescueMarker) {
+          rescueMarker = createFrozenRescueMarker();
+          this.scene.add(rescueMarker);
+          this.frozenRescueMarkers.set(remote.playerId, rescueMarker);
+        }
+        rescueMarker.visible = true;
+        rescueMarker.position.set(position.x, position.y + 3.15, position.z);
+      } else if (rescueMarker) {
+        disposeFrozenRescueMarker(rescueMarker);
+        this.frozenRescueMarkers.delete(remote.playerId);
       }
       const distanceFromLocal = p ? Math.hypot(remote.x - p.x, remote.z - p.z) : Infinity;
       const isNearby = model.visible && distanceFromLocal < 35;
@@ -563,8 +671,17 @@ export class GameScene {
         }
       }
     }
+    const activeRemoteIds = new Set(
+      session.view.players
+        .filter((player) => player.playerId !== session.playerId)
+        .map((player) => player.playerId),
+    );
+    for (const [playerId, marker] of this.frozenRescueMarkers) {
+      if (activeRemoteIds.has(playerId)) continue;
+      disposeFrozenRescueMarker(marker);
+      this.frozenRescueMarkers.delete(playerId);
+    }
     for (const event of session.events.splice(0)) {
-      if (event.type === 'player/respawned') continue;
       const local = session.playerId;
       const eventKey =
         event.type === 'player/frozen'
@@ -605,7 +722,12 @@ export class GameScene {
     // Snowstorm progression keyed to existing timer remaining
     if (session.view.phase === 'playing' && this.snowstorm) {
       const remainingMs = session.view.phaseDeadline - serverNow;
-      this.snowstorm.update(now / 1000, remainingMs, this.camera.position);
+      this.snowstorm.update(
+        now / 1000,
+        remainingMs,
+        this.camera.position,
+        session.view.snowStarted,
+      );
     }
     this.effects.update(now);
     this.renderer.render(this.scene, this.camera);

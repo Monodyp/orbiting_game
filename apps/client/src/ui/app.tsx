@@ -2,10 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import {
   sanitizeDisplayName,
   normalizeInviteCode,
+  type ChatMessage,
   type GuestSession,
   type LobbyView,
-  type GameMode,
-  type MapId,
   type SessionError,
 } from '@ice-water/shared';
 import {
@@ -26,7 +25,6 @@ import { LobbyAudio } from '../audio/lobby-audio.js';
 import { GameHud } from './game-hud.js';
 import { TouchControls } from './touch-controls.js';
 import { Scoreboard } from './scoreboard.js';
-import { DeathScreen } from './death-screen.js';
 import { ResultsScreen } from './results-screen.js';
 import { SettingsPanel } from './settings-panel.js';
 import { LobbyScreen } from './lobby-screen.js';
@@ -35,6 +33,7 @@ export function App() {
   const [guest, setGuest] = useState<GuestSession | null>(readGuest);
   const [room, setRoom] = useState<LobbyRoom | null>(null),
     [view, setView] = useState<LobbyView | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState(''),
     [isBusy, setBusy] = useState(true),
     [connection, setConnection] = useState('Connected');
@@ -43,6 +42,10 @@ export function App() {
     [settings, setSettings] = useState(readSettings);
   const [, refreshMapStatus] = useState(0);
   const [isSettings, setIsSettings] = useState(false);
+  const [isChatFocused, setIsChatFocused] = useState(false);
+  const [hasEnteredArena, setHasEnteredArena] = useState(false);
+  const [spectatorTargetId, setSpectatorTargetId] = useState<string | null>(null);
+  const [dismissedRoundInstruction, setDismissedRoundInstruction] = useState<string | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null),
     roomRef = useRef<LobbyRoom | null>(null),
     sceneRef = useRef<GameScene | null>(null);
@@ -52,6 +55,26 @@ export function App() {
   if (!lobbyAudio.current) lobbyAudio.current = new LobbyAudio(settings);
   const isInGame = !!view && !['lobby', 'countdown'].includes(view.phase);
   const isComplete = view?.phase === 'finished' || view?.phase === 'intermission';
+  const local = view?.players.find((player) => player.playerId === guest?.playerId);
+  const activeSpectatorTargets =
+    view?.players.filter(
+      (player) =>
+        player.isConnected &&
+        (player.team === 'ice' || player.team === 'water') &&
+        (player.status === 'alive' || player.status === 'frozen'),
+    ) ?? [];
+  const activeSpectatorTargetKey = activeSpectatorTargets.map((player) => player.playerId).join('|');
+  const spectatorTarget = activeSpectatorTargets.find(
+    (player) => player.playerId === spectatorTargetId,
+  ) ?? activeSpectatorTargets[0];
+  const roundInstructionKey =
+    view?.phase === 'playing' && (local?.team === 'ice' || local?.team === 'water')
+      ? `${view.phaseDeadline}:${local.team}`
+      : null;
+  const isRoundInstructionVisible =
+    hasEnteredArena &&
+    roundInstructionKey !== null &&
+    dismissedRoundInstruction !== roundInstructionKey;
 
   useEffect(() => {
     if (isComplete) {
@@ -59,6 +82,35 @@ export function App() {
       sceneRef.current?.getInput().reset();
     }
   }, [isComplete]);
+  useEffect(() => {
+    if (local?.team !== 'none') return;
+    document.exitPointerLock();
+    scene?.getInput().reset();
+  }, [local?.status, scene]);
+  useEffect(() => {
+    if (local?.team !== 'none' || !scene) {
+      if (spectatorTargetId !== null) setSpectatorTargetId(null);
+      return;
+    }
+    const candidates = scene.session.view.players.filter(
+      (player) =>
+        player.isConnected &&
+        (player.team === 'ice' || player.team === 'water') &&
+        (player.status === 'alive' || player.status === 'frozen'),
+    );
+    const current = candidates.find((player) => player.playerId === spectatorTargetId);
+    const target = current ?? candidates[0];
+    const nextId = scene.setSpectatorTarget(target?.playerId) ?? null;
+    setSpectatorTargetId((previous) => (previous === nextId ? previous : nextId));
+  }, [activeSpectatorTargetKey, local?.status, scene, spectatorTargetId]);
+  useEffect(() => {
+    if (!isInGame) {
+      setHasEnteredArena(false);
+      setDismissedRoundInstruction(null);
+      setIsChatFocused(false);
+    }
+    if (isComplete) setIsChatFocused(false);
+  }, [isInGame, isComplete]);
   useEffect(() => {
     let active = true;
     void reconnectRoom()
@@ -113,18 +165,34 @@ export function App() {
   }, [settings, scene]);
   useEffect(() => {
     if (!scene) return;
-    scene.isPaused = isSettings;
-    if (isSettings) {
+    const shouldBlockInput = isSettings || isRoundInstructionVisible || isChatFocused;
+    scene.isPaused = shouldBlockInput;
+    if (shouldBlockInput) {
       document.exitPointerLock();
       scene.getInput().reset();
       scene.getInput().isEnabled = false;
     } else scene.getInput().isEnabled = scene.isTouch || scene.isLocked;
-  }, [isSettings, scene]);
+  }, [isSettings, isRoundInstructionVisible, isChatFocused, scene]);
+  useEffect(() => {
+    if (scene?.isTouch && scene.isMapReady) setHasEnteredArena(true);
+  }, [scene, scene?.isMapReady]);
+
+  function resumeArena() {
+    setHasEnteredArena(true);
+    setIsSettings(false);
+    if (!scene) return;
+    scene.isPaused = false;
+    scene.getInput().reset();
+    scene.getInput().isEnabled = !scene.isPaused;
+    if (!scene.isTouch) scene.lock();
+  }
 
   function attach(next: LobbyRoom) {
     roomCleanup.current.forEach((cleanup) => cleanup());
     roomCleanup.current = [];
     roomRef.current = next;
+    setChatMessages([]);
+    setIsChatFocused(false);
     setRoom(next);
     setError('');
     setConnection('Connected');
@@ -139,13 +207,13 @@ export function App() {
     roomCleanup.current.push(() => next.onStateChange.remove(update));
     roomCleanup.current.push(
       next.onMessage<SessionError>('session/error', (message) => setError(message.message)),
+      next.onMessage<ChatMessage>('chat/message', (message) =>
+        setChatMessages((current) => [...current.slice(-19), message]),
+      ),
     );
     roomCleanup.current.push(
       next.onMessage('match/phase-changed', () => setError('')),
       next.onMessage('match/result', () => {}),
-    );
-    roomCleanup.current.push(
-      next.onMessage('player/respawned', () => {}),
     );
     const drop = () => setConnection('Reconnecting…'),
       reconnect = () => {
@@ -166,6 +234,8 @@ export function App() {
       clearReconnect();
       setRoom(null);
       setView(null);
+      setChatMessages([]);
+      setIsChatFocused(false);
       setError(complete ? '' : 'Your room connection ended. Create a room or join again.');
     });
     update();
@@ -192,11 +262,10 @@ export function App() {
     }
     void run(async () => setGuest(await createGuest(value)));
   }
-  async function create(_mode: GameMode, mapId: MapId) {
+  async function create() {
     if (!guest) return;
     const next = await reserveRoom(guest);
     attach(next);
-    next.send('room/configure', { mapId });
   }
   function join(code: string) {
     const invite = normalizeInviteCode(code);
@@ -219,13 +288,16 @@ export function App() {
     setView(null);
     setError('');
   }
+  function sendChat(message: string) {
+    if (roomRef.current && view?.phase === 'playing')
+      roomRef.current.send('chat/send', { message });
+  }
 
   const settingsPanel = isSettings && (
     <div className="modal-backdrop">
       <SettingsPanel value={settings} onChange={setSettings} onClose={() => setIsSettings(false)} />
     </div>
   );
-  const local = view?.players.find((player) => player.playerId === guest?.playerId);
   if (isInGame && view && guest) {
     const complete = view.phase === 'finished' || view.phase === 'intermission';
     return (
@@ -237,13 +309,62 @@ export function App() {
             localPlayerId={guest.playerId}
             serverNow={now}
             crosshair={settings.crosshair}
+            chatMessages={chatMessages}
+            onChatSend={sendChat}
+            onChatFocusChange={(isFocused) => {
+              if (isFocused) {
+                sceneRef.current?.getInput().reset();
+                document.exitPointerLock();
+              } else if (
+                view?.phase === 'playing' &&
+                hasEnteredArena &&
+                !sceneRef.current?.isTouch &&
+                !isSettings &&
+                !isRoundInstructionVisible
+              ) {
+                sceneRef.current?.lock();
+              }
+              setIsChatFocused(isFocused);
+            }}
+            isRoundInstructionVisible={isRoundInstructionVisible}
+            onRoundInstructionDismiss={() => {
+              if (!roundInstructionKey) return;
+              setDismissedRoundInstruction(roundInstructionKey);
+              if (!scene?.isTouch) scene?.lock();
+            }}
           />
         )}
-        {scene?.isTouch && !complete && !isSettings && (
+          {!complete && local?.team === 'none' && (
+            <section className="spectator-panel" aria-label="Spectator controls" role="status">
+              <span>Spectating</span>
+              <strong>Watching: {spectatorTarget?.displayName ?? 'No active players'}</strong>
+              <div>
+                <button
+                  type="button"
+                  aria-label="Previous spectator target"
+                  disabled={activeSpectatorTargets.length < 2}
+                  onClick={() =>
+                    setSpectatorTargetId(scene?.cycleSpectatorTarget(-1) ?? null)
+                  }
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  aria-label="Next spectator target"
+                  disabled={activeSpectatorTargets.length < 2}
+                  onClick={() =>
+                    setSpectatorTargetId(scene?.cycleSpectatorTarget(1) ?? null)
+                  }
+                >
+                  Next
+                </button>
+              </div>
+              {!scene?.isTouch && <small>[ / ] or Arrow keys</small>}
+            </section>
+          )}
+          {scene?.isTouch && !complete && !isSettings && local?.team !== 'none' && (
           <TouchControls input={scene.getInput()} />
-        )}
-        {!complete && local?.status === 'dead' && (
-          <DeathScreen view={view} player={local} now={now} />
         )}
         {!complete && scene?.getInput().isScoreboard && (
           <div className="scoreboard-overlay">
@@ -252,7 +373,7 @@ export function App() {
         )}
         {!complete && scene && !scene.isMapReady && (
           <div className="pause-screen">
-            <h2>{scene.hasMapError ? 'Frost Island failed to load' : 'Loading Frost Island…'}</h2>
+            <h2>{scene.hasMapError ? 'Frostline failed to load' : 'Loading Frostline…'}</h2>
             {scene.hasMapError && <button onClick={() => leave()}>Back to lobby</button>}
           </div>
         )}
@@ -261,25 +382,19 @@ export function App() {
           scene.isMapReady &&
           !scene.isTouch &&
           !scene.isLocked &&
+          (local?.team === 'ice' || local?.team === 'water') &&
+          local.status !== 'spectator' &&
           !isSettings && (
             <div className="pause-screen">
-              <h2>
-                {view.mapId === 'original'
-                  ? 'Original World'
-                  : view.mapId === 'island'
-                    ? 'Frost Island'
-                    : 'Frostline'}
-              </h2>
+              <h2>Frostline</h2>
               <p>Click to aim. Esc releases your cursor.</p>
-              <button className="primary" onClick={() => scene.lock()}>
+              <button className="primary" type="button" onClick={resumeArena}>
                 Enter arena
               </button>
             </div>
           )}
         {complete && (
           <ResultsScreen
-            view={view}
-            localPlayerId={guest.playerId}
             result={{
               winner: view.matchWinner,
               reason: view.resultReason || 'water-survived',
@@ -320,7 +435,7 @@ export function App() {
       settings={settings}
       onSettings={setSettings}
       onIdentify={identify}
-      onCreate={(mode, mapId) => void run(() => create(mode, mapId))}
+      onCreate={() => void run(create)}
       onJoin={join}
       onLeave={() => void run(leave)}
       onForgetGuest={() => {
