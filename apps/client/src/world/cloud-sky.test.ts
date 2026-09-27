@@ -85,4 +85,26 @@ describe('CloudSky', () => {
       sky.destroy();
     }
   });
+
+  it('darkens, densifies and accelerates Frostline clouds as the blizzard rises', () => {
+    const sky = new CloudSky(new Scene(), 'frostline');
+    try {
+      const batch = sky.group.children[0] as InstancedMesh;
+      const material = batch.material as import('three').MeshBasicMaterial;
+      sky.update(10, new Vector3(), 'high', 0, 0, 0);
+      const calmColor = material.color.getHex();
+      const calmOpacity = material.opacity;
+      const calmMatrix = new Matrix4();
+      batch.getMatrixAt(0, calmMatrix);
+
+      sky.update(10, new Vector3(), 'high', 0, 1, 1);
+      const stormMatrix = new Matrix4();
+      batch.getMatrixAt(0, stormMatrix);
+      expect(material.color.getHex()).not.toBe(calmColor);
+      expect(material.opacity).toBeGreaterThan(calmOpacity);
+      expect(stormMatrix.equals(calmMatrix)).toBe(false);
+    } finally {
+      sky.destroy();
+    }
+  });
 });

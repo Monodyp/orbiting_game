@@ -12,6 +12,8 @@ All playable maps use sparse, original procedural cloud banks with varied scale,
 
 At exactly two minutes remaining, Frostline and Frost Island enter a 12-second nightfall: the sky and distance fog deepen to navy, cloud banks cool toward lavender-blue, and the main illumination shifts from warm daylight to readable blue moonlight. Underwater fog remains unchanged. The HUD uses one large frost-lit “Only 2 minutes left” announcement for five seconds; reduced-effects mode applies the lighting state immediately while preserving the alert.
 
+Frostline's four-minute storm warning is the start of a continuous weather arc, not an instant filter. Sparse diagonal flakes and distant haze build into layered far, environmental, near-camera, and ankle-height spindrift. Irregular brief gusts drive faster horizontal streaks, denser ground ribbons, louder wind, and imperceptibly small camera sway. Cool blue-gray cloud banks, desaturated light, roof/platform accumulation, and pale distance fog culminate in a whiteout that obscures long lanes while preserving nearby silhouettes and the central aiming area. Edge frost remains peripheral. All particles are camera-local GPU points; accumulation overlays are presentation-only and do not alter collision.
+
 ## Visual language
 - Crisp, readable low-poly painted metal, polar-white walls, navy structural blocks, cyan ice, amber route paint, and coral opponents.
 - Palette: #EDF6FA polar white, #18334B structural navy, #74D9EC ice cyan, #308CAD painted blue, #F3B747 safety amber, #E96958 danger coral.

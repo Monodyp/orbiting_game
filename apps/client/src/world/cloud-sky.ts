@@ -265,6 +265,9 @@ export class CloudSky {
   private readonly isPermanentNight: boolean;
   private readonly dayCloudColors = DAY_THEME.colors.map((color) => new Color(color));
   private readonly nightCloudColors = NIGHT_THEME.colors.map((color) => new Color(color));
+  private readonly stormCloudColors = [0x46545f, 0x34424f, 0x5c6974].map(
+    (color) => new Color(color),
+  );
   private readonly transform = new Object3D();
 
   constructor(scene: Scene, mapId: MapId, lights: readonly Light[] = []) {
@@ -287,11 +290,20 @@ export class CloudSky {
     cameraPosition: Vector3,
     quality: CloudQuality,
     nightProgress = 0,
+    stormIntensity = 0,
+    stormGust = 0,
   ): void {
     const transition = this.isPermanentNight ? 1 : clamp01(nightProgress);
-    const radius = mix(DAY_THEME.radius, NIGHT_THEME.radius, transition);
-    const altitudeScale = mix(DAY_THEME.altitudeScale, NIGHT_THEME.altitudeScale, transition);
-    const motionScale = quality === 'low' ? 0.22 : quality === 'medium' ? 0.72 : 1;
+    const storm = this.isPermanentNight ? 0 : clamp01(stormIntensity);
+    const gust = clamp01(stormGust);
+    const radius = mix(mix(DAY_THEME.radius, NIGHT_THEME.radius, transition), 132, storm);
+    const altitudeScale = mix(
+      mix(DAY_THEME.altitudeScale, NIGHT_THEME.altitudeScale, transition),
+      0.72,
+      storm,
+    );
+    const qualityMotion = quality === 'low' ? 0.22 : quality === 'medium' ? 0.72 : 1;
+    const motionScale = qualityMotion * (1 + storm * 3.2 + gust * 2.1);
     for (let shape = 0; shape < this.batches.length; shape++) {
       const mesh = this.batches[shape]!;
       const material = mesh.material as MeshBasicMaterial;
@@ -300,7 +312,8 @@ export class CloudSky {
         this.nightCloudColors[shape]!,
         transition,
       );
-      material.opacity = mix(DAY_THEME.opacity, NIGHT_THEME.opacity, transition);
+      material.color.lerp(this.stormCloudColors[shape]!, storm);
+      material.opacity = mix(mix(DAY_THEME.opacity, NIGHT_THEME.opacity, transition), 0.86, storm);
       const specs = CLOUD_BATCH_SPECS[shape]!;
       const qualityScale = quality === 'low' ? 0.4 : quality === 'medium' ? 0.7 : 1;
       mesh.count = Math.max(2, Math.ceil(specs.length * qualityScale));
@@ -323,7 +336,11 @@ export class CloudSky {
       elapsedSeconds,
       cameraPosition.x,
       cameraPosition.z,
-      mix(DAY_THEME.maxLightAttenuation, NIGHT_THEME.maxLightAttenuation, transition),
+      mix(
+        mix(DAY_THEME.maxLightAttenuation, NIGHT_THEME.maxLightAttenuation, transition),
+        0.24 + gust * 0.06,
+        storm,
+      ),
       quality !== 'low',
     );
     const nightLightScale = this.isPermanentNight ? 1 : mix(1, 0.46, transition);
