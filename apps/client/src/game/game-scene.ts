@@ -50,7 +50,7 @@ import {
   disposePlayerNameplate,
   setNameplateTone,
 } from './player-nameplate.js';
-import { Snowstorm } from './snowstorm.js';
+import { CLEAR_STORM_FRAME, Snowstorm, type SnowstormFrame } from './snowstorm.js';
 import { createFrozenRescueMarker, disposeFrozenRescueMarker } from './frozen-rescue-marker.js';
 import {
   cycleSpectatorTarget,
@@ -65,6 +65,11 @@ const NIGHT_GROUND_LIGHT = new Color(0x101c31);
 const DAY_KEY_LIGHT = new Color(0xfff0d0);
 const NIGHT_KEY_LIGHT = new Color(0xa9c8ff);
 const ICE_NIGHT_FOG_NEAR = 10;
+const STORM_SKY = new Color(0x263746);
+const STORM_FOG = new Color(0xa6b5bd);
+const STORM_SKY_LIGHT = new Color(0xa8c5d5);
+const STORM_GROUND_LIGHT = new Color(0x172733);
+const STORM_KEY_LIGHT = new Color(0xb8d8e5);
 
 export class GameScene {
   readonly session: GameSession;
@@ -156,12 +161,13 @@ export class GameScene {
     private readonly onMapStatusChange?: () => void,
   ) {
     this.session = new GameSession(room, playerId);
-    this.nightProgress = this.session.view.phase === 'playing'
-      ? matchNightProgress(
-          this.session.view.mapId,
-          this.session.view.phaseDeadline - this.session.serverNow(),
-        )
-      : 0;
+    this.nightProgress =
+      this.session.view.phase === 'playing'
+        ? matchNightProgress(
+            this.session.view.mapId,
+            this.session.view.phaseDeadline - this.session.serverNow(),
+          )
+        : 0;
     this.renderer = new WebGLRenderer({
       canvas,
       antialias: !this.isTouch,
@@ -205,7 +211,7 @@ export class GameScene {
     this.effects = new HitEffects(this.scene);
     // Snowstorm: active only on Frostline, quality follows same tier as clouds
     if (this.session.view.mapId === 'frostline') {
-      const snowQuality = this.isTouch ? 'medium' : 'high';
+      const snowQuality = this.settings.reducedEffects ? 'low' : this.isTouch ? 'medium' : 'high';
       this.snowstorm = new Snowstorm(this.scene, 'frostline', snowQuality);
     }
     void loadGameplayCharacterFactories().then((factories) => {
@@ -410,7 +416,10 @@ export class GameScene {
     }
     return material;
   }
-  private applyWaterEnvironment(isCameraUnderwater: boolean): void {
+  private applyWaterEnvironment(
+    isCameraUnderwater: boolean,
+    storm: SnowstormFrame = CLEAR_STORM_FRAME,
+  ): void {
     const environment = matchEnvironmentFor(
       this.session.view.mapId,
       isCameraUnderwater,
@@ -436,22 +445,35 @@ export class GameScene {
 
     const background = this.scene.background instanceof Color ? this.scene.background : new Color();
     background.setHex(environment.background);
+    if (storm.intensity > 0 && !isCameraUnderwater)
+      background.lerp(STORM_SKY, storm.intensity * 0.82);
     this.scene.background = background;
     if (this.session.view.mapId === 'original' && !isCameraUnderwater) {
       if (this.scene.fog instanceof FogExp2) this.scene.fog.color.setHex(environment.fogColor);
       else this.scene.fog = new FogExp2(environment.fogColor, 0.0032);
-    } else if (this.scene.fog instanceof Fog) {
+    } else {
+      if (!(this.scene.fog instanceof Fog)) this.scene.fog = new Fog(fogColor, fogNear, fogFar);
       this.scene.fog.color.setHex(fogColor);
       this.scene.fog.near = fogNear;
       this.scene.fog.far = fogFar;
-    } else this.scene.fog = new Fog(fogColor, fogNear, fogFar);
+      if (storm.intensity > 0 && !isCameraUnderwater) {
+        this.scene.fog.color.lerp(STORM_FOG, storm.intensity ** 1.2);
+        this.scene.fog.near = Math.min(fogNear, storm.fogNear);
+        this.scene.fog.far = Math.min(fogFar, storm.fogFar);
+      }
+    }
     this.cloudSky?.setUnderwater(isCameraUnderwater);
   }
-  private applyMatchLighting(): void {
+  private applyMatchLighting(storm: SnowstormFrame = CLEAR_STORM_FRAME): void {
     if (!this.skyLight || !this.keyLight) return;
     this.skyLight.color.copy(DAY_SKY_LIGHT).lerp(NIGHT_SKY_LIGHT, this.nightProgress);
     this.skyLight.groundColor.copy(DAY_GROUND_LIGHT).lerp(NIGHT_GROUND_LIGHT, this.nightProgress);
     this.keyLight.color.copy(DAY_KEY_LIGHT).lerp(NIGHT_KEY_LIGHT, this.nightProgress);
+    this.skyLight.color.lerp(STORM_SKY_LIGHT, storm.intensity);
+    this.skyLight.groundColor.lerp(STORM_GROUND_LIGHT, storm.intensity);
+    this.keyLight.color.lerp(STORM_KEY_LIGHT, storm.intensity);
+    this.skyLight.intensity *= storm.lightScale;
+    this.keyLight.intensity *= storm.lightScale;
   }
   private loop(now: number): void {
     if (this.destroyed) return;
@@ -461,12 +483,10 @@ export class GameScene {
       p = session.local(),
       serverNow = session.serverNow(),
       input = session.input;
-    this.nightProgress = session.view.phase === 'playing'
-      ? matchNightProgress(
-        session.view.mapId,
-        session.view.phaseDeadline - serverNow,
-      )
-      : 0;
+    this.nightProgress =
+      session.view.phase === 'playing'
+        ? matchNightProgress(session.view.mapId, session.view.phaseDeadline - serverNow)
+        : 0;
     input.isEnabled = !this.isPaused && p?.status === 'alive';
     input.sensitivity = this.settings.sensitivity * 0.002;
     this.audio.volume = this.settings.isMuted
@@ -592,8 +612,8 @@ export class GameScene {
               : remote.team === 'ice'
                 ? GAMEPLAY_TEAM_COLORS.ice.hex
                 : friend
-                ? 0x308cad
-                : 0xe96958,
+                  ? 0x308cad
+                  : 0xe96958,
         );
       model.scale.y =
         remote.status === 'frozen' ? 1.1 : remote.isCrouching || remote.isSliding ? 0.61 : 1;
@@ -608,7 +628,8 @@ export class GameScene {
         setNameplateTone(nameplate, key);
       }
       let rescueMarker = this.frozenRescueMarkers.get(remote.playerId);
-      const shouldShowFrozenMarker = p?.team === 'water' && remote.team === 'water' && remote.status === 'frozen';
+      const shouldShowFrozenMarker =
+        p?.team === 'water' && remote.team === 'water' && remote.status === 'frozen';
       if (shouldShowFrozenMarker) {
         if (!rescueMarker) {
           rescueMarker = createFrozenRescueMarker();
@@ -716,18 +737,31 @@ export class GameScene {
       this.originalLighting?.update(this.camera.position, quality);
       this.world.update(now / 1000, this.camera.position, quality);
     }
-    this.applyWaterEnvironment(this.wasUnderwater);
-    this.applyMatchLighting();
-    this.cloudSky.update(now / 1000, this.camera.position, quality, this.nightProgress);
-    // Snowstorm progression keyed to existing timer remaining
-    if (session.view.phase === 'playing' && this.snowstorm) {
-      const remainingMs = session.view.phaseDeadline - serverNow;
-      this.snowstorm.update(
-        now / 1000,
-        remainingMs,
-        this.camera.position,
-        session.view.snowStarted,
-      );
+    const remainingMs =
+      session.view.phase === 'playing'
+        ? session.view.phaseDeadline - serverNow
+        : Number.POSITIVE_INFINITY;
+    const hasSnowStarted = session.view.phase === 'playing' && session.view.snowStarted;
+    const storm =
+      this.snowstorm?.update(now / 1000, remainingMs, this.camera.position, hasSnowStarted) ??
+      CLEAR_STORM_FRAME;
+    if (this.world instanceof FrostlineMap) this.world.setSnowAccumulation(storm.accumulation);
+    this.audio.setStorm(storm.intensity, storm.gust);
+    this.applyWaterEnvironment(this.wasUnderwater, storm);
+    this.cloudSky.update(
+      now / 1000,
+      this.camera.position,
+      quality,
+      this.nightProgress,
+      storm.intensity,
+      storm.gust,
+    );
+    this.applyMatchLighting(storm);
+    if (this.session.view.mapId === 'frostline') this.renderer.toneMappingExposure = storm.exposure;
+    if (!this.settings.reducedEffects && storm.intensity > 0) {
+      this.camera.rotation.x += storm.cameraPitch;
+      this.camera.rotation.y += storm.cameraYaw;
+      this.camera.rotation.z = storm.cameraRoll;
     }
     this.effects.update(now);
     this.renderer.render(this.scene, this.camera);
