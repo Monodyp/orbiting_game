@@ -431,9 +431,10 @@ test('mobile touch movement, sprint, lunge, tag and controls work without overfl
     await expect
       .poll(() => Math.hypot(ice.x - initialPosition.x, ice.z - initialPosition.z))
       .toBeGreaterThan(0.5);
-    const look = (await page.getByLabel('Drag to look').boundingBox())!;
-    const lookX = look.x + look.width * 0.65;
-    const lookY = look.y + look.height * 0.4;
+    const viewport = page.viewportSize()!;
+    const lookX = viewport.width * 0.2;
+    const lookY = viewport.height * 0.42;
+    const beforeLook = { yaw: ice.yaw, pitch: ice.pitch };
     await cdp.send('Input.dispatchTouchEvent', {
       type: 'touchStart',
       touchPoints: [
@@ -445,21 +446,54 @@ test('mobile touch movement, sprint, lunge, tag and controls work without overfl
       type: 'touchMove',
       touchPoints: [
         { id: 1, x: stickX, y: stickY - 50 },
-        { id: 2, x: lookX + 100, y: lookY },
+        { id: 2, x: lookX + 80, y: lookY + 45 },
       ],
     });
-    await expect.poll(() => ice.yaw).not.toBe(initialPosition.yaw);
+    await expect.poll(() => ice.yaw).not.toBe(beforeLook.yaw);
+    await expect.poll(() => ice.pitch).not.toBe(beforeLook.pitch);
+
+    const sprint = page.getByRole('button', { name: 'Sprint', exact: true });
+    const sprintBox = (await sprint.boundingBox())!;
+    const sprintPoint = {
+      id: 7,
+      x: sprintBox.x + sprintBox.width / 2,
+      y: sprintBox.y + sprintBox.height / 2,
+    };
+    const lookYawBeforeSprint = ice.yaw;
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [
+        { id: 1, x: stickX, y: stickY - 50 },
+        { id: 2, x: lookX + 80, y: lookY + 45 },
+        sprintPoint,
+      ],
+    });
+    await expect(sprint).toHaveAttribute('aria-pressed', 'true');
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [
+        { id: 1, x: stickX, y: stickY - 50 },
+        { id: 2, x: lookX + 110, y: lookY + 65 },
+        sprintPoint,
+      ],
+    });
+    await expect.poll(() => ice.yaw).not.toBe(lookYawBeforeSprint);
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await touchTap(cdp, page.getByRole('button', { name: 'Sprint', exact: true }));
-    await expect(page.getByRole('button', { name: 'Sprint', exact: true })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
-    await touchTap(cdp, page.getByRole('button', { name: 'Sprint', exact: true }));
-    await expect(page.getByRole('button', { name: 'Sprint', exact: true })).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    );
+    const yawBeforeControlDrag = ice.yaw;
+    const sequenceBeforeControlDrag = ice.inputSequence;
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [sprintPoint] });
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ ...sprintPoint, x: sprintPoint.x - 70, y: sprintPoint.y - 70 }],
+    });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect.poll(() => ice.inputSequence).toBeGreaterThan(sequenceBeforeControlDrag);
+    expect(ice.yaw).toBe(yawBeforeControlDrag);
+    await expect(sprint).toHaveAttribute('aria-pressed', 'false');
+    await touchTap(cdp, sprint);
+    await expect(sprint).toHaveAttribute('aria-pressed', 'true');
+    await touchTap(cdp, sprint);
+    await expect(sprint).toHaveAttribute('aria-pressed', 'false');
     await expect(page.getByRole('button', { name: 'Slide', exact: true })).toBeVisible();
     await touchTap(cdp, page.getByRole('button', { name: 'Lunge', exact: true }));
     await expect.poll(() => ice.lungeUntil).toBeGreaterThan(Date.now());

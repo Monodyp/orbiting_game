@@ -1048,6 +1048,7 @@ form .primary {
 .game-hud {
   position: absolute;
   inset: 0;
+  z-index: 1;
   pointer-events: none;
   color: white;
   text-shadow: 0 1px 5px #18334b;
@@ -1776,12 +1777,14 @@ form .primary {
 }
 .touch-look {
   position: absolute;
-  inset: 100px 0 70px 32%;
+  inset: 0;
+  z-index: 0;
   pointer-events: auto;
   touch-action: none;
 }
 .touch-stick {
   position: absolute;
+  z-index: 2;
   bottom: 165px;
   left: 25px;
   width: 115px;
@@ -1808,6 +1811,7 @@ form .primary {
 }
 .touch-actions {
   position: absolute;
+  z-index: 2;
   right: 18px;
   bottom: 160px;
   display: grid;
