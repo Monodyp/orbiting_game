@@ -12,8 +12,6 @@ All playable maps use sparse, original procedural cloud banks with varied scale,
 
 At exactly 2:00 elapsed in the five-minute match, Frostline and Frost Island enter Night; at exactly 3:00 elapsed, the sky, distance fog, clouds, and lighting return to their daytime state. Water receives only the shared Night environment. Ice additionally receives local black linear fog that remains clear through 10 metres and reaches black by 50 metres; it is removed with the same Night state. Underwater fog remains unchanged. The HUD briefly announces “Night begins” at activation. Original World retains its authored permanent-night presentation.
 
-Frostline's four-minute storm warning is the start of a continuous weather arc, not an instant filter. Sparse diagonal flakes and distant haze build into layered far, environmental, near-camera, and ankle-height spindrift. Irregular brief gusts drive faster horizontal streaks, denser ground ribbons, louder wind, and imperceptibly small camera sway. Cool blue-gray cloud banks, desaturated light, roof/platform accumulation, and pale distance fog culminate in a whiteout that obscures long lanes while preserving nearby silhouettes and the central aiming area. Edge frost remains peripheral. All particles are camera-local GPU points; accumulation overlays are presentation-only and do not alter collision.
-
 ## Visual language
 - Crisp, readable low-poly painted metal, polar-white walls, navy structural blocks, cyan ice, amber route paint, and coral opponents.
 - Palette: #EDF6FA polar white, #18334B structural navy, #74D9EC ice cyan, #308CAD painted blue, #F3B747 safety amber, #E96958 danger coral.

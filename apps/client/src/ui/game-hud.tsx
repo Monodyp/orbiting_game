@@ -1,14 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
-import { MAX_CHAT_MESSAGE_LENGTH, type ChatMessage, type LobbyView } from '@ice-water/shared';
+import {
+  MAX_CHAT_MESSAGE_LENGTH,
+  type ChatMessage,
+  type LobbyView,
+} from '@ice-water/shared';
 import { isNightWarningVisible } from '../game/match-night.js';
 import { KeyboardKeyIcon, MouseButtonIcon } from './control-icons.js';
-import {
-  isSnowstormWarningVisible,
-  isSnowstormBegunVisible,
-  snowstormIntensity,
-  stormGustStrength,
-} from '../game/snowstorm.js';
 export type KillEntry = never;
 
 type WeatherNotification = { kind: 'snow' | 'blizzard'; message: string };
@@ -75,7 +72,9 @@ export function GameHud({
     blizzardEnabled: view.blizzardEnabled,
     blizzardStarted: view.blizzardStarted,
   });
-  const [weatherNotification, setWeatherNotification] = useState<WeatherNotification | null>(null);
+  const [weatherNotification, setWeatherNotification] = useState<WeatherNotification | null>(
+    null,
+  );
 
   useEffect(() => {
     const current: WeatherState = {
@@ -102,20 +101,8 @@ export function GameHud({
   const isPlaying = view.phase === 'playing';
   const role = p.team === 'ice' ? 'ICE' : p.team === 'water' ? 'WATER' : null;
   const roundInstruction = isRoundInstructionVisible ? roundInstructionFor(p.team) : null;
-  const showSnowstormWarning = isPlaying && isSnowstormWarningVisible(remainingMs, view.mapId);
-  const showSnowstormBegun = isPlaying && isSnowstormBegunVisible(remainingMs, view.mapId);
-  const stormIntensity =
-    isPlaying && view.snowStarted ? snowstormIntensity(remainingMs, view.mapId) : 0;
-  const stormGust = isPlaying ? stormGustStrength(remainingMs, view.mapId) : 0;
-  const stormStyle = {
-    '--storm-intensity': stormIntensity,
-    '--storm-gust': stormGust,
-  } as CSSProperties;
   return (
     <div className="game-hud">
-      {stormIntensity > 0 && (
-        <div className="snowstorm-lens" style={stormStyle} aria-hidden="true" />
-      )}
       <div className="match-clock">
         <span>Ice Ice Water</span>
         <strong>
@@ -153,7 +140,7 @@ export function GameHud({
           Night begins
         </div>
       )}
-      {isPlaying && weatherNotification && !showSnowstormWarning && !showSnowstormBegun && (
+      {isPlaying && weatherNotification && (
         <div
           className={`weather-notification weather-notification--${weatherNotification.kind}`}
           role="status"
@@ -162,18 +149,12 @@ export function GameHud({
           {weatherNotification.message}
         </div>
       )}
-      {showSnowstormWarning && (
-        <div className="snowstorm-warning" role="alert" aria-live="assertive">
-          ⚠ SNOWSTORM APPROACHING ⚠
-        </div>
-      )}
-      {showSnowstormBegun && (
-        <div className="snowstorm-begun" role="status" aria-live="polite">
-          THE SNOWSTORM HAS BEGUN
-        </div>
-      )}
       {isPlaying && (
-        <GameChat messages={chatMessages} onSend={onChatSend} onFocusChange={onChatFocusChange} />
+        <GameChat
+          messages={chatMessages}
+          onSend={onChatSend}
+          onFocusChange={onChatFocusChange}
+        />
       )}
       {p.status === 'frozen' && (
         <div className="frozen-status" role="status">
