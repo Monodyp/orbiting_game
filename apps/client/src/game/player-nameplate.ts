@@ -2,6 +2,7 @@ import { CanvasTexture, LinearFilter, Sprite, SpriteMaterial, SRGBColorSpace } f
 
 const NAMEPLATE_WIDTH = 256;
 const NAMEPLATE_HEIGHT = 64;
+const NAMEPLATE_ALWAYS_VISIBLE_RANGE = 3;
 
 export type NameplateTone = 'enemy' | 'friend' | 'protected' | 'frozen';
 
@@ -41,7 +42,7 @@ export function createPlayerNameplate(displayName: string): Sprite {
   const material = new SpriteMaterial({
     map: texture,
     transparent: true,
-    opacity: 0.72,
+    opacity: 0.9,
     alphaTest: 0.08,
     depthWrite: false,
     sizeAttenuation: false,
@@ -49,9 +50,13 @@ export function createPlayerNameplate(displayName: string): Sprite {
   });
   const nameplate = new Sprite(material);
   nameplate.name = `nameplate-${displayName}`;
-  nameplate.scale.set(0.34, 0.085, 1);
+  nameplate.scale.set(0.56, 0.14, 1);
   nameplate.renderOrder = 3;
   return nameplate;
+}
+
+export function shouldDepthTestNameplate(distance: number): boolean {
+  return distance >= NAMEPLATE_ALWAYS_VISIBLE_RANGE;
 }
 
 export function setNameplateTone(nameplate: Sprite, tone: NameplateTone): void {

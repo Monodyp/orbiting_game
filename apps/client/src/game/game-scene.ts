@@ -48,6 +48,7 @@ import {
 import {
   createPlayerNameplate,
   disposePlayerNameplate,
+  shouldDepthTestNameplate,
   setNameplateTone,
 } from './player-nameplate.js';
 import { Snowstorm } from './snowstorm.js';
@@ -597,9 +598,11 @@ export class GameScene {
         );
       model.scale.y =
         remote.status === 'frozen' ? 1.1 : remote.isCrouching || remote.isSliding ? 0.61 : 1;
+      const distanceFromLocal = p ? Math.hypot(remote.x - p.x, remote.z - p.z) : Infinity;
       const nameplate = this.nameplates.get(remote.playerId);
       if (nameplate) {
         nameplate.visible = model.visible;
+        nameplate.material.depthTest = shouldDepthTestNameplate(distanceFromLocal);
         nameplate.position.set(
           position.x,
           position.y + (remote.isCrouching || remote.isSliding ? 1.28 : 2.03),
@@ -621,7 +624,6 @@ export class GameScene {
         disposeFrozenRescueMarker(rescueMarker);
         this.frozenRescueMarkers.delete(remote.playerId);
       }
-      const distanceFromLocal = p ? Math.hypot(remote.x - p.x, remote.z - p.z) : Infinity;
       const isNearby = model.visible && distanceFromLocal < 35;
       const previousLungeUntil = this.remoteLunges.get(remote.playerId);
       const previousGrounded = this.remoteGrounded.get(remote.playerId);

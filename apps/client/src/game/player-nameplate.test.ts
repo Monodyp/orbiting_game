@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createPlayerNameplate, disposePlayerNameplate } from './player-nameplate.js';
+import {
+  createPlayerNameplate,
+  disposePlayerNameplate,
+  shouldDepthTestNameplate,
+} from './player-nameplate.js';
 
 describe('player nameplate', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -36,8 +40,16 @@ describe('player nameplate', () => {
     expect(context.strokeRect).not.toHaveBeenCalled();
     expect(context.strokeText).toHaveBeenCalledWith('Frost Runner', 128, 32);
     expect(context.fillText).toHaveBeenCalledWith('Frost Runner', 128, 32);
-    expect(nameplate.material.opacity).toBe(0.72);
+    expect(nameplate.material.opacity).toBe(0.9);
+    expect(nameplate.material.sizeAttenuation).toBe(false);
+    expect(nameplate.scale.toArray()).toEqual([0.56, 0.14, 1]);
 
     disposePlayerNameplate(nameplate);
+  });
+
+  it('keeps close nameplates on top of nearby player geometry only', () => {
+    expect(shouldDepthTestNameplate(2.99)).toBe(false);
+    expect(shouldDepthTestNameplate(3)).toBe(true);
+    expect(shouldDepthTestNameplate(10)).toBe(true);
   });
 });
