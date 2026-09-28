@@ -45,6 +45,8 @@ Additive `003-arena-matches.sql` creates match-summary tables without modifying 
 
 Node 24.18.0 / npm 11.17.0 and lockfile pins remain. Migrations use transactions/advisory locks/checksums. Local Compose and readiness semantics remain. Free-tier hosting is an unselected measured spike. No deployment is implied. Throughput, mobile performance, and latency fairness remain gates.
 
+Production deployment uses a separate `compose.production.yaml`: Nginx serves the Vite SPA and proxies the guest/room API paths, Colyseus reconnect endpoint, and `/{processId}/{roomId}` WebSocket path to one Node server. Only Nginx publishes host ports; PostgreSQL and Node remain on internal Docker networks. Production client builds embed a WSS origin, production server config requires HTTPS `CLIENT_ORIGIN` and PostgreSQL, and migrations remain an explicit operator command. The local Compose database, loopback defaults, and Quick Tunnel development allowance are unchanged. See `docs/DEPLOYMENT.md` for TLS and operations.
+
 ## Alternatives and consequences
 Freeze-tag is the only game mode; FPS health, weapons, kills/deaths, solo start, and duel are out of scope. Spectator is a pre-game role, not an elimination outcome. The user-authorized local Island asset is integrated with recorded embedded metadata and an explicit underlying-permission release gate. The supplied wooden-house source and attribution are retained but, as of 2026-09-25, the model and its collider are no longer part of Frostline. Shared kinematics/analytic collision retain the dependency footprint. The user also approved integrating the supplied Island GLB; `MAP_SPEC.md` preserves map implementation details, while only Frostline is available to players.
 

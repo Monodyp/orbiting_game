@@ -19,11 +19,13 @@ logs/
 *.pid
 tmp/
 temp/
+.deployment/
 
 # Environment and secrets
 .env
 .env.*
 !.env.example
+!.env.production.example
 *.pem
 *.key
 

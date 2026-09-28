@@ -18,7 +18,9 @@ npm run dev
 
 Open **http://localhost:5173** (or **http://127.0.0.1:5173**). Server: **127.0.0.1:2567**. Keep the terminal running. On PowerShell, use `npm.cmd` if `npm.ps1` is blocked. Setup creates an ignored `.env` and preserves an existing one. Never put secrets in browser-visible `VITE_` variables.
 
-The existing local database uses port 55432. Docker must be running. If port 5432 is reserved, set both `POSTGRES_PORT` and the port in `DATABASE_URL` to 55432. `db:down` retains data. Gameplay runs without PostgreSQL, but summary writes fail and `/ready` reports 503. Migrations 003/004/005 add match-summary tables and map identity while preserving historical data.
+The local database uses `POSTGRES_PORT` (5432 in `.env.example`) and is bound to loopback by `compose.yaml`. Docker must be running. If port 5432 is reserved, set both `POSTGRES_PORT` and the port in `DATABASE_URL` to another port. `db:down` retains data. Gameplay runs without PostgreSQL, but summary writes fail and `/ready` reports 503.
+
+For the separate Linode/Ubuntu production Compose stack, HTTPS/WSS, migration, DNS, and operations instructions, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). It does not replace the local Compose or development Quick Tunnel workflow.
 
 ## Play
 

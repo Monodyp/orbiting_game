@@ -98,4 +98,6 @@ npm run typecheck
 npm run build
 ```
 
+Production Docker, Linode, database migration, DNS, and HTTPS/WSS instructions are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). They use a separate Compose file; the local `compose.yaml` and development workflow remain unchanged.
+
 See [README.md](README.md) for gameplay controls, configuration options, browser tests, and load-test commands.
